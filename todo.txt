@@ -1,8 +1,0 @@
-REAK device setup TODO
-=====================
-
-[ ] Check that workstations/ubuntu/setup.sh works properly on a clean Ubuntu install, then integrate Fleet enrollment into the setup workflow.
-
-[ ] Review the installed software list and remove packages/tools that are no longer needed. Replace Visual Studio Code with Zed, including any required settings or extensions.
-
-[ ] Set up CI/CD and static hosting for setup.sh so a reinstall can fetch it from a stable custom URL, for example https://setup.reak.co.in/install.sh. Decide on the hosting provider, DNS/TLS setup, and how releases are reviewed and published.

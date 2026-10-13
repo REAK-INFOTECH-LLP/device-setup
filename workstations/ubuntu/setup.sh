@@ -75,18 +75,10 @@ if ! command -v bruno >/dev/null 2>&1; then
   log "Installing Bruno 2.9.1."
   install_deb https://github.com/usebruno/bruno/releases/download/v2.9.1/bruno_2.9.1_amd64_linux.deb /tmp/bruno.deb
 fi
-if ! command -v code >/dev/null 2>&1; then
-  log "Installing VS Code."
-  install_deb 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64' /tmp/vscode.deb
+if ! command -v zed >/dev/null 2>&1; then
+  log "Installing Zed."
+  curl -f https://zed.dev/install.sh | sh
 fi
-
-config_dir="/home/$USERNAME/.config/Code/User"
-install -d -o "$USERNAME" -g "$USERNAME" "$config_dir"
-cat > "$config_dir/settings.json" <<'EOF'
-{"telemetry.telemetryLevel":"off"}
-EOF
-chown "$USERNAME:$USERNAME" "$config_dir/settings.json"
-runuser -u "$USERNAME" -- code --install-extension GitHub.copilot --force || true
 
 install -d -m 755 /etc/firefox/policies
 cat > /etc/firefox/policies/policies.json <<'EOF'
@@ -125,9 +117,13 @@ fi
 
 if [[ ! -x /usr/local/bin/opkssh ]]; then
   log "Installing opkssh."
-  curl -fL https://github.com/openpubkey/opkssh/releases/latest/download/opkssh-linux-amd64 \
+  curl -fL https://github.com/openpubkey/opkssh/releases/latest_download/opkssh-linux-amd64 \
     -o /usr/local/bin/opkssh
   chmod 755 /usr/local/bin/opkssh
 fi
+
+log "Installing Tailscale."
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up --auth-key "$TAILSCALE_AUTH_KEY" --accept-routes --advertise-tags "tag:dev"
 
 log "Baseline setup complete. Reboot the workstation, then enroll it in Fleet using the documented procedure."
