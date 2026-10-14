@@ -66,7 +66,7 @@ export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
 # export REAK_USERNAME=reak
 # export REAK_SSH_USER=administrator
 
-curl -fsSL https://raw.githubusercontent.com/REAK-INFOTECH-LLP/device-setup/feature/setup-fleet-enrollment/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
+curl -fsSL https://it.reak.co.in/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
 chmod +x /tmp/reak-setup.sh
 sudo -E /tmp/reak-setup.sh
 ```
@@ -77,7 +77,7 @@ Baseline only from raw URL (no Fleet secret needed):
 export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
 export SKIP_FLEET=1
 
-curl -fsSL https://raw.githubusercontent.com/REAK-INFOTECH-LLP/device-setup/feature/setup-fleet-enrollment/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
+curl -fsSL https://it.reak.co.in/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
 chmod +x /tmp/reak-setup.sh
 sudo -E /tmp/reak-setup.sh
 ```
