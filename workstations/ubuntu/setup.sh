@@ -211,7 +211,12 @@ if ! command -v go >/dev/null 2>&1; then
   go_archive="$go_download_dir/${go_version}.linux-amd64.tar.gz"
   wget -q "https://go.dev/dl/${go_version}.linux-amd64.tar.gz" -O "$go_archive"
   wget -q "https://go.dev/dl/${go_version}.linux-amd64.tar.gz.sha256" -O "$go_archive.sha256"
-  (cd "$go_download_dir" && sha256sum -c "${go_version}.linux-amd64.tar.gz.sha256")
+  # go.dev publishes the .sha256 file as a bare hash, which `sha256sum -c`
+  # cannot parse directly, so compare the digests explicitly.
+  expected_sum="$(tr -d '[:space:]' < "$go_archive.sha256")"
+  [[ "$expected_sum" =~ ^[0-9a-f]{64}$ ]] || die "Invalid Go checksum file."
+  actual_sum="$(sha256sum "$go_archive" | awk '{print $1}')"
+  [[ "$actual_sum" == "$expected_sum" ]] || die "Go checksum mismatch."
   rm -rf /usr/local/go
   tar -C /usr/local -xzf "$go_archive"
   rm -rf "$go_download_dir"
