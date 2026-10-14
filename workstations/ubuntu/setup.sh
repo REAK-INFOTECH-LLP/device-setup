@@ -193,9 +193,12 @@ EOF
 if [[ ! -d "/home/$USERNAME/.nvm" ]]; then
   assert_not_symlink "/home/$USERNAME/.nvm"
   nvm_download_dir="$(mktemp -d /tmp/reak-nvm.XXXXXX)"
+  # mktemp -d creates mode 0700; the installer runs as $USERNAME via runuser,
+  # so the directory and script must be readable by that user.
+  chmod 755 "$nvm_download_dir"
   wget -q https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh \
     -O "$nvm_download_dir/install.sh"
-  chmod 755 "$nvm_download_dir/install.sh"
+  chmod 644 "$nvm_download_dir/install.sh"
   runuser -u "$USERNAME" -- env HOME="/home/$USERNAME" bash "$nvm_download_dir/install.sh"
   rm -rf "$nvm_download_dir"
 fi
