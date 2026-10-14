@@ -210,7 +210,9 @@ if ! command -v go >/dev/null 2>&1; then
   go_download_dir="$(mktemp -d /tmp/reak-go.XXXXXX)"
   go_archive="$go_download_dir/${go_version}.linux-amd64.tar.gz"
   wget -q "https://go.dev/dl/${go_version}.linux-amd64.tar.gz" -O "$go_archive"
-  wget -q "https://go.dev/dl/${go_version}.linux-amd64.tar.gz.sha256" -O "$go_archive.sha256"
+  # NOTE: go.dev serves an HTML page for the .sha256 URL, so fetch the bare
+  # hash from dl.google.com instead, then compare digests explicitly.
+  wget -q "https://dl.google.com/go/${go_version}.linux-amd64.tar.gz.sha256" -O "$go_archive.sha256"
   # go.dev publishes the .sha256 file as a bare hash, which `sha256sum -c`
   # cannot parse directly, so compare the digests explicitly.
   expected_sum="$(tr -d '[:space:]' < "$go_archive.sha256")"
