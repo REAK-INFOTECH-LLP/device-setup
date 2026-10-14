@@ -344,7 +344,22 @@ success "Fleet CLI is ready."
 # ---------- 3. Existing agent ----------
 step "3/7 — Checking Existing Enrollment"
 
+# "active" alone does not mean enrolled: a crash-looping orbit (e.g. 401
+# authentication failures) looks active between restarts. Detect that state
+# and force a clean re-enrollment instead of leaving it broken.
+orbit_active=0
 if systemctl is-active --quiet orbit 2>/dev/null; then
+  orbit_active=1
+fi
+orbit_installed=0
+if dpkg-query -W -f='${Status}' fleet-osquery 2>/dev/null | grep -qx 'install ok installed'; then
+  orbit_installed=1
+fi
+orbit_auth_failures="$(journalctl -u orbit --since '15 min ago' --no-pager 2>/dev/null | grep -cE '401 unauthenticated|run orbit failed' || true)"
+orbit_restarts="$(systemctl show orbit -p NRestarts --value 2>/dev/null || echo 0)"
+[[ "$orbit_restarts" =~ ^[0-9]+$ ]] || orbit_restarts=0
+
+if [[ "$orbit_active" -eq 1 && "$orbit_auth_failures" -eq 0 ]]; then
     success "Orbit is already running; leaving it unchanged."
     log "Status: systemctl status orbit --no-pager -l"
     log "Logs: sudo journalctl -u orbit -n 100 --no-pager"
@@ -352,7 +367,14 @@ if systemctl is-active --quiet orbit 2>/dev/null; then
     exit 0
 fi
 
-if dpkg-query -W -f='${Status}' fleet-osquery 2>/dev/null | grep -qx 'install ok installed'; then
+if [[ "$orbit_auth_failures" -gt 0 || "$orbit_restarts" -ge 10 ]]; then
+    warn "Existing Fleet agent state looks broken (auth failures: $orbit_auth_failures, restarts: $orbit_restarts)."
+    warn "Removing it for a clean re-enrollment with the current secret."
+    systemctl stop orbit 2>/dev/null || true
+    systemctl reset-failed orbit 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y fleet-osquery 2>/dev/null || true
+    rm -rf /opt/orbit /var/lib/orbit
+elif [[ "$orbit_installed" -eq 1 ]]; then
     warn "fleet-osquery is installed, but Orbit is inactive."
 fi
 
@@ -451,6 +473,15 @@ if systemctl is-active --quiet orbit; then
 else
     as_root journalctl -u orbit -n 60 --no-pager || true
     die "Orbit failed to start."
+fi
+
+log "Waiting briefly to confirm the agent authenticates with Fleet..."
+sleep 25
+if journalctl -u orbit --since '2 min ago' --no-pager 2>/dev/null | grep -q '401 unauthenticated'; then
+    warn "Orbit reported '401 unauthenticated'; the host is NOT enrolled."
+    warn "Copy the exact enroll secret from Fleet (Hosts → Add hosts) and re-run with that ENROLL_SECRET."
+else
+    success "No authentication failures in recent Orbit logs."
 fi
 
 step "Connectivity Check"
