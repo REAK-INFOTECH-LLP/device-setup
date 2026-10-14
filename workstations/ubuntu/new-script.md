@@ -34,6 +34,16 @@ Examples:
 sudo env SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)" ./workstations/ubuntu/setup.sh
 ```
 
+All exports in one block (copy-paste, then edit values):
+
+```sh
+export REAK_USERNAME="reak"
+export REAK_SSH_USER="administrator"
+export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
+export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
+export SKIP_FLEET="0"
+```
+
 Baseline only (skip Fleet):
 
 ```sh
