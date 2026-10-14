@@ -45,6 +45,8 @@
   h2 { margin-top: 44px; font-size: 24px; color: var(--accent); }
   p.muted, .muted { color: var(--muted); }
   li { margin-bottom: 8px; }
+  ol, ul { margin: 0; padding-left: 22px; max-width: 100%; }
+  ol li, ul li { overflow-wrap: break-word; }
   .panel {
     background: var(--panel);
     border: 1px solid var(--panel-border);
@@ -77,8 +79,11 @@
   }
   .copybtn:hover { background: var(--accent-dark); color: #0d0c0b; }
   code { font-family: Consolas, "Courier New", monospace; }
-  table { width: 100%; border-collapse: collapse; font-size: 15px; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--panel-border); }
+  table { width: 100%; max-width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--panel-border); overflow-wrap: break-word; }
+  th:nth-child(1), td:nth-child(1) { width: 40%; }
+  th:nth-child(2), td:nth-child(2) { width: 35%; }
+  th:nth-child(3), td:nth-child(3) { width: 25%; }
   th { color: var(--accent); }
   .btn {
     display: inline-block;
