@@ -7,14 +7,15 @@
 <style>
   :root {
     --bg: #141311;
-    --panel: #1e1c19;
-    --panel-border: #35322c;
-    --text: #ece7dd;
-    --muted: #a8a094;
-    --accent: #4ade80;
-    --accent-dark: #16a34a;
-    --warn: #f5a623;
+    --panel: #221f1b;
+    --panel-border: #4a4438;
+    --text: #f5f1e8;
+    --muted: #cfc8b8;
+    --accent: #5df08a;
+    --accent-dark: #22b45e;
+    --warn: #ffb62e;
     --code-bg: #0d0c0b;
+    --code-text: #f0ebdf;
   }
   * { box-sizing: border-box; }
   body {
@@ -22,7 +23,8 @@
     background: var(--bg);
     color: var(--text);
     font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-    line-height: 1.6;
+    font-size: 17px;
+    line-height: 1.75;
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { color: var(--warn); text-decoration: underline; }
@@ -39,23 +41,26 @@
     padding: 4px 14px;
     margin-bottom: 12px;
   }
-  h1 { margin: 0 0 8px; font-size: 34px; }
-  h2 { margin-top: 40px; font-size: 22px; color: var(--accent); }
+  h1 { margin: 0 0 10px; font-size: 36px; line-height: 1.3; }
+  h2 { margin-top: 44px; font-size: 24px; color: var(--accent); }
   p.muted, .muted { color: var(--muted); }
+  li { margin-bottom: 8px; }
   .panel {
     background: var(--panel);
     border: 1px solid var(--panel-border);
     border-radius: 10px;
-    padding: 20px 22px;
+    padding: 22px 24px;
     margin: 18px 0;
   }
   pre {
     background: var(--code-bg);
+    color: var(--code-text);
     border: 1px solid var(--panel-border);
     border-radius: 8px;
     padding: 16px;
     overflow-x: auto;
-    font-size: 14px;
+    font-size: 15px;
+    line-height: 1.7;
   }
   .codebox { position: relative; }
   .copybtn {
@@ -72,8 +77,8 @@
   }
   .copybtn:hover { background: var(--accent-dark); color: #0d0c0b; }
   code { font-family: Consolas, "Courier New", monospace; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--panel-border); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--panel-border); }
   th { color: var(--accent); }
   .btn {
     display: inline-block;
