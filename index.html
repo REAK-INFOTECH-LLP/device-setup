@@ -82,19 +82,23 @@
     <div class="badge">REAK &bull; Device Setup</div>
     <h1>Ubuntu Workstation Setup + Fleet Enrollment</h1>
     <p class="muted">One script: baseline hardening, apps and tooling, then automatic Fleet enrollment.</p>
-    <a class="btn" href="https://raw.githubusercontent.com/REAK-INFOTECH-LLP/device-setup/feature/setup-fleet-enrollment/workstations/ubuntu/setup.sh">Download setup.sh</a>
+    <a class="btn" href="https://reak-infotech-llp.github.io/device-setup/workstations/ubuntu/setup.sh">Download setup.sh</a>
     <a class="btn ghost" href="https://github.com/REAK-INFOTECH-LLP/device-setup/tree/feature/setup-fleet-enrollment/workstations/ubuntu">Browse files</a>
   </header>
 
   <h2>Quick install</h2>
-  <div class="panel">
+    <p class="muted">One-line install (replace the placeholder values):</p>
+<pre><code>export SSH_PUB_KEY="YOUR_ADMIN_PUBLIC_KEY"
+export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
+curl -fsSL https://reak-infotech-llp.github.io/device-setup/workstations/ubuntu/setup.sh | sudo -E bash</code></pre>
+    <p class="muted">Full version with all variables:</p>
 <pre><code>export REAK_USERNAME="reak"
 export REAK_SSH_USER="administrator"
-export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
+export SSH_PUB_KEY="YOUR_ADMIN_PUBLIC_KEY"
 export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
 export SKIP_FLEET="0"
 
-curl -fsSL https://raw.githubusercontent.com/REAK-INFOTECH-LLP/device-setup/feature/setup-fleet-enrollment/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
+curl -fsSL https://reak-infotech-llp.github.io/device-setup/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
 chmod +x /tmp/reak-setup.sh
 sudo -E /tmp/reak-setup.sh</code></pre>
     <p class="muted">Baseline only (no Fleet secret needed): set <code>SKIP_FLEET=1</code> and skip <code>ENROLL_SECRET</code>.</p>
