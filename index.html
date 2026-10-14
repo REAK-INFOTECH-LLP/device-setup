@@ -65,6 +65,25 @@
     .doc-link:hover, .doc-link.active { color: var(--accent); background: var(--surface-2); }
     main { min-width: 0; }
     .content { max-width: 900px; margin: 0 auto; padding: 48px 34px 72px; }
+    .hero { margin-bottom: 38px; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
+    .hero h1 { margin: 0 0 8px; font-size: 34px; line-height: 1.3; }
+    .hero p { margin: 0 0 20px; color: var(--muted); }
+    .install-title { margin: 26px 0 8px; color: var(--accent); font-size: 18px; }
+    .codebox { position: relative; }
+    .copy-button {
+      position: absolute;
+      top: 9px;
+      right: 9px;
+      z-index: 1;
+      padding: 4px 10px;
+      color: var(--accent);
+      background: var(--surface-2);
+      border: 1px solid var(--accent-strong);
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .copy-button:hover { color: var(--bg); background: var(--accent); }
     .topbar { display: flex; justify-content: space-between; gap: 18px; align-items: baseline; border-bottom: 1px solid var(--border); padding-bottom: 22px; margin-bottom: 32px; }
     .topbar h1 { margin: 0; font-size: 30px; line-height: 1.3; }
     .source { font-size: 13px; white-space: nowrap; }
@@ -108,6 +127,24 @@
     </aside>
     <main>
       <div class="content">
+        <section class="hero">
+          <h1>Ubuntu Workstation Setup + Fleet Enrollment</h1>
+          <p>Baseline hardening, applications, tooling, and Fleet enrollment in one setup script.</p>
+          <h2 class="install-title">Quick install</h2>
+          <div class="codebox">
+            <button class="copy-button" onclick="copyBlock(this)">Copy</button>
+            <pre><code>export REAK_USERNAME="reak"
+export REAK_SSH_USER="administrator"
+export SSH_PUB_KEY="YOUR_ADMIN_PUBLIC_KEY"
+export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
+export SKIP_FLEET="0"
+
+curl -fsSL https://reak-infotech-llp.github.io/device-setup/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
+chmod +x /tmp/reak-setup.sh
+sudo -E /tmp/reak-setup.sh</code></pre>
+          </div>
+          <p>Replace the placeholder values before running. Set <code>SKIP_FLEET="1"</code> for baseline setup without Fleet.</p>
+        </section>
         <div class="topbar">
           <h1 id="page-title">Documentation</h1>
           <a id="source" class="source" href="#" target="_blank" rel="noreferrer">View source</a>
@@ -160,6 +197,13 @@
     }
 
     search.addEventListener("input", event => renderNav(event.target.value));
+    function copyBlock(button) {
+      const text = button.parentElement.querySelector("code").innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        button.textContent = "Copied";
+        setTimeout(() => button.textContent = "Copy", 1400);
+      });
+    }
     renderNav();
     loadDocument(documents[0]);
   </script>
