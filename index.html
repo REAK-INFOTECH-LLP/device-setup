@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REAK Device Setup</title>
+<style>
+  :root {
+    --bg: #141311;
+    --panel: #1e1c19;
+    --panel-border: #35322c;
+    --text: #ece7dd;
+    --muted: #a8a094;
+    --accent: #4ade80;
+    --accent-dark: #16a34a;
+    --warn: #f5a623;
+    --code-bg: #0d0c0b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--warn); text-decoration: underline; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 20px 64px; }
+  header { border-bottom: 1px solid var(--panel-border); padding-bottom: 24px; margin-bottom: 32px; }
+  .badge {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent-dark);
+    border-radius: 999px;
+    padding: 4px 14px;
+    margin-bottom: 12px;
+  }
+  h1 { margin: 0 0 8px; font-size: 34px; }
+  h2 { margin-top: 40px; font-size: 22px; color: var(--accent); }
+  p.muted, .muted { color: var(--muted); }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin: 18px 0;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 14px;
+  }
+  code { font-family: Consolas, "Courier New", monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--accent); }
+  .btn {
+    display: inline-block;
+    background: var(--accent-dark);
+    color: #0d0c0b;
+    font-weight: 700;
+    border-radius: 8px;
+    padding: 10px 22px;
+    margin: 6px 8px 6px 0;
+  }
+  .btn:hover { background: var(--accent); color: #0d0c0b; text-decoration: none; }
+  .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent-dark); }
+  footer { margin-top: 48px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--panel-border); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="badge">REAK &bull; Device Setup</div>
+    <h1>Ubuntu Workstation Setup + Fleet Enrollment</h1>
+    <p class="muted">One script: baseline hardening, apps and tooling, then automatic Fleet enrollment.</p>
+    <a class="btn" href="https://raw.githubusercontent.com/REAK-INFOTECH-LLP/device-setup/feature/setup-fleet-enrollment/workstations/ubuntu/setup.sh">Download setup.sh</a>
+    <a class="btn ghost" href="https://github.com/REAK-INFOTECH-LLP/device-setup/tree/feature/setup-fleet-enrollment/workstations/ubuntu">Browse files</a>
+  </header>
+
+  <h2>Quick install</h2>
+  <div class="panel">
+<pre><code>export REAK_USERNAME="reak"
+export REAK_SSH_USER="administrator"
+export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
+export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
+export SKIP_FLEET="0"
+
+curl -fsSL https://raw.githubusercontent.com/REAK-INFOTECH-LLP/device-setup/feature/setup-fleet-enrollment/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
+chmod +x /tmp/reak-setup.sh
+sudo -E /tmp/reak-setup.sh</code></pre>
+    <p class="muted">Baseline only (no Fleet secret needed): set <code>SKIP_FLEET=1</code> and skip <code>ENROLL_SECRET</code>.</p>
+  </div>
+
+  <h2>What it does</h2>
+  <div class="panel">
+    <ol>
+      <li>Safety checks: root, Ubuntu/Debian, <strong>amd64</strong>.</li>
+      <li>Creates the <code>reak</code> user (locked, no password).</li>
+      <li>Installs baseline packages.</li>
+      <li>Validates your SSH key, then hardens SSH (key-only, <code>administrator</code> only).</li>
+      <li>Installs Docker, Chrome, Bruno, VS Code, NVM, Go, opkssh.</li>
+      <li>Enrolls the host in Fleet: builds the <code>deb</code> with <code>fleetctl</code>, installs it, starts Orbit, verifies connectivity, deletes the temp package.</li>
+    </ol>
+  </div>
+
+  <h2>Variables</h2>
+  <div class="panel">
+    <table>
+      <tr><th>Variable</th><th>Required</th><th>Default</th></tr>
+      <tr><td><code>SSH_PUB_KEY</code></td><td>Yes</td><td>—</td></tr>
+      <tr><td><code>ENROLL_SECRET</code></td><td>For Fleet</td><td>—</td></tr>
+      <tr><td><code>SKIP_FLEET</code></td><td>No</td><td><code>0</code></td></tr>
+      <tr><td><code>REAK_USERNAME</code></td><td>No</td><td><code>reak</code></td></tr>
+      <tr><td><code>REAK_SSH_USER</code></td><td>No</td><td><code>administrator</code></td></tr>
+    </table>
+  </div>
+
+  <h2>Docs</h2>
+  <div class="panel">
+    <ul>
+      <li><a href="https://github.com/REAK-INFOTECH-LLP/device-setup/blob/feature/setup-fleet-enrollment/workstations/ubuntu/new-script.md">Full script walkthrough (new-script.md)</a></li>
+      <li><a href="https://github.com/REAK-INFOTECH-LLP/device-setup/blob/feature/setup-fleet-enrollment/workstations/ubuntu/README.md">Ubuntu setup README</a></li>
+      <li><a href="https://github.com/REAK-INFOTECH-LLP/device-setup/pull/3">Pull request #3</a></li>
+    </ul>
+    <p class="muted">After setup, confirm the host in Fleet under <strong>Hosts → Manage hosts</strong>. Never commit enrollment secrets.</p>
+  </div>
+
+  <footer>REAK device-setup · branch <code>feature/setup-fleet-enrollment</code></footer>
+
+</div>
+</body>
+</html>
