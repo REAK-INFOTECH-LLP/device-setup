@@ -57,6 +57,20 @@
     overflow-x: auto;
     font-size: 14px;
   }
+  .codebox { position: relative; }
+  .copybtn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: var(--panel);
+    color: var(--accent);
+    border: 1px solid var(--accent-dark);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .copybtn:hover { background: var(--accent-dark); color: #0d0c0b; }
   code { font-family: Consolas, "Courier New", monospace; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--panel-border); }
@@ -88,10 +102,15 @@
 
   <h2>Quick install</h2>
     <p class="muted">One-line install (replace the placeholder values):</p>
+    <div class="codebox">
+      <button class="copybtn" onclick="copyCode(this)">Copy</button>
 <pre><code>export SSH_PUB_KEY="YOUR_ADMIN_PUBLIC_KEY"
 export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
 curl -fsSL https://reak-infotech-llp.github.io/device-setup/workstations/ubuntu/setup.sh | sudo -E bash</code></pre>
+    </div>
     <p class="muted">Full version with all variables:</p>
+    <div class="codebox">
+      <button class="copybtn" onclick="copyCode(this)">Copy</button>
 <pre><code>export REAK_USERNAME="reak"
 export REAK_SSH_USER="administrator"
 export SSH_PUB_KEY="YOUR_ADMIN_PUBLIC_KEY"
@@ -101,6 +120,7 @@ export SKIP_FLEET="0"
 curl -fsSL https://reak-infotech-llp.github.io/device-setup/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
 chmod +x /tmp/reak-setup.sh
 sudo -E /tmp/reak-setup.sh</code></pre>
+    </div>
     <p class="muted">Baseline only (no Fleet secret needed): set <code>SKIP_FLEET=1</code> and skip <code>ENROLL_SECRET</code>.</p>
   </div>
 
@@ -141,5 +161,17 @@ sudo -E /tmp/reak-setup.sh</code></pre>
   <footer>REAK device-setup · branch <code>feature/setup-fleet-enrollment</code></footer>
 
 </div>
+<script>
+function copyCode(btn) {
+  var code = btn.parentElement.querySelector("code").innerText;
+  navigator.clipboard.writeText(code).then(function () {
+    btn.textContent = "Copied!";
+    setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+  }, function () {
+    btn.textContent = "Failed";
+    setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+  });
+}
+</script>
 </body>
 </html>
