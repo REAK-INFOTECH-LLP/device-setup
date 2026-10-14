@@ -8,6 +8,9 @@ USERNAME="${REAK_USERNAME:-reak}"
 SSH_USER="${REAK_SSH_USER:-administrator}"
 SSH_PUB_KEY="${SSH_PUB_KEY:-}"
 SKIP_FLEET="${SKIP_FLEET:-0}"
+DOCKER_GROUP_ACCESS="${DOCKER_GROUP_ACCESS:-0}"
+FLEET_ENABLE_SCRIPTS="${FLEET_ENABLE_SCRIPTS:-0}"
+INSTALL_COPILOT="${INSTALL_COPILOT:-0}"
 
 log() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
@@ -16,8 +19,15 @@ die() { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 command -v apt-get >/dev/null || die "This script supports Debian-based Ubuntu systems only."
 ARCH="$(dpkg --print-architecture)"
 [[ "$ARCH" == "amd64" ]] || die "This script supports amd64 only; found $ARCH."
+[[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "Invalid REAK_USERNAME."
+[[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "Invalid REAK_SSH_USER."
 id "$SSH_USER" >/dev/null 2>&1 || die "Required SSH account '$SSH_USER' does not exist."
 [[ -n "$SSH_PUB_KEY" ]] || die "Set SSH_PUB_KEY to the approved administrator public key."
+
+assert_not_symlink() {
+  local path="$1"
+  [[ ! -L "$path" ]] || die "Refusing to write through symlink: $path"
+}
 
 if ! id "$USERNAME" >/dev/null 2>&1; then
   log "Creating account '$USERNAME' without a preset password."
@@ -42,63 +52,104 @@ fi
 rm -f "$key_tmp"
 
 log "Configuring key-based SSH for '$SSH_USER'."
+assert_not_symlink "/home/$SSH_USER"
 ssh_dir="/home/$SSH_USER/.ssh"
+assert_not_symlink "$ssh_dir"
 install -d -m 700 -o "$SSH_USER" -g "$SSH_USER" "$ssh_dir"
-printf '%s\n' "$SSH_PUB_KEY" > "$ssh_dir/authorized_keys"
-chown "$SSH_USER:$SSH_USER" "$ssh_dir/authorized_keys"
-chmod 600 "$ssh_dir/authorized_keys"
+authorized_keys="$ssh_dir/authorized_keys"
+assert_not_symlink "$authorized_keys"
+touch "$authorized_keys"
+grep -qxF "$SSH_PUB_KEY" "$authorized_keys" || printf '%s\n' "$SSH_PUB_KEY" >> "$authorized_keys"
+chown "$SSH_USER:$SSH_USER" "$authorized_keys"
+chmod 600 "$authorized_keys"
 
-sshd_config=/etc/ssh/sshd_config
-cp -n "$sshd_config" "$sshd_config.reak-backup"
-if grep -qE '^[[:space:]#]*PasswordAuthentication[[:space:]]' "$sshd_config"; then
-  sed -i -E 's/^[[:space:]#]*PasswordAuthentication[[:space:]].*/PasswordAuthentication no/' "$sshd_config"
-else
-  printf '\nPasswordAuthentication no\n' >> "$sshd_config"
+sshd_dropin_dir=/etc/ssh/sshd_config.d
+sshd_dropin="$sshd_dropin_dir/00-reak.conf"
+install -d -m 755 "$sshd_dropin_dir"
+assert_not_symlink "$sshd_dropin"
+sshd_dropin_backup=""
+if [[ -e "$sshd_dropin" ]]; then
+  sshd_dropin_backup="$(mktemp)"
+  cp -p "$sshd_dropin" "$sshd_dropin_backup"
 fi
-if grep -qE '^[[:space:]#]*PermitRootLogin[[:space:]]' "$sshd_config"; then
-  sed -i -E 's/^[[:space:]#]*PermitRootLogin[[:space:]].*/PermitRootLogin no/' "$sshd_config"
-else
-  printf '\nPermitRootLogin no\n' >> "$sshd_config"
+sshd_dropin_tmp="$(mktemp "$sshd_dropin_dir/00-reak.conf.XXXXXX")"
+chmod 644 "$sshd_dropin_tmp"
+cat > "$sshd_dropin_tmp" <<EOF
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+PubkeyAuthentication yes
+AllowUsers $SSH_USER
+EOF
+if ! mv -f "$sshd_dropin_tmp" "$sshd_dropin"; then
+  rm -f "$sshd_dropin_tmp"
+  die "Could not install SSH hardening drop-in."
 fi
-sed -i -E '/^[[:space:]]*AllowUsers[[:space:]]/d' "$sshd_config"
-printf '\nAllowUsers %s\n' "$SSH_USER" >> "$sshd_config"
-sshd -t
+if ! sshd -t || ! sshd -T | grep -Eq "^passwordauthentication no$" || \
+   ! sshd -T | grep -Eq "^kbdinteractiveauthentication no$" || \
+   ! sshd -T | grep -Eq "^permitrootlogin no$" || \
+   ! sshd -T | grep -Eq "^allowusers $SSH_USER$"; then
+  if [[ -n "$sshd_dropin_backup" ]]; then
+    cp -p "$sshd_dropin_backup" "$sshd_dropin"
+  else
+    rm -f "$sshd_dropin"
+  fi
+  rm -f "$sshd_dropin_backup"
+  die "Effective SSH configuration did not pass hardening checks."
+fi
+[[ -z "$sshd_dropin_backup" ]] || rm -f "$sshd_dropin_backup"
 systemctl enable --now ssh
-systemctl restart ssh
+systemctl reload ssh
 
 if ! command -v docker >/dev/null 2>&1; then
   log "Installing Docker using Docker's installation script."
   curl -fsSL https://get.docker.com | sh
 fi
-usermod -aG docker "$USERNAME"
+if [[ "$DOCKER_GROUP_ACCESS" == "1" ]]; then
+  log "Granting '$USERNAME' access to the root-equivalent docker group."
+  usermod -aG docker "$USERNAME"
+else
+  log "Leaving '$USERNAME' out of the root-equivalent docker group."
+fi
 
 install_deb() {
-  local url="$1" path="$2"
-  wget -q "$url" -O "$path"
-  gdebi -n "$path"
-  rm -f "$path"
+  local url="$1" package_name="$2" download_dir path
+  download_dir="$(mktemp -d /tmp/reak-download.XXXXXX)"
+  path="$download_dir/$package_name"
+  if ! wget -q "$url" -O "$path" || ! gdebi -n "$path"; then
+    rm -rf "$download_dir"
+    return 1
+  fi
+  rm -rf "$download_dir"
 }
 
 if ! command -v google-chrome >/dev/null 2>&1; then
   log "Installing Chrome."
-  install_deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb /tmp/chrome.deb
+  install_deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb chrome.deb
 fi
 if ! command -v bruno >/dev/null 2>&1; then
   log "Installing Bruno 2.9.1."
-  install_deb https://github.com/usebruno/bruno/releases/download/v2.9.1/bruno_2.9.1_amd64_linux.deb /tmp/bruno.deb
+  install_deb https://github.com/usebruno/bruno/releases/download/v2.9.1/bruno_2.9.1_amd64_linux.deb bruno.deb
 fi
 if ! command -v code >/dev/null 2>&1; then
   log "Installing VS Code."
-  install_deb 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64' /tmp/vscode.deb
+  install_deb 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64' vscode.deb
 fi
 
+assert_not_symlink "/home/$USERNAME"
 config_dir="/home/$USERNAME/.config/Code/User"
+assert_not_symlink "/home/$USERNAME/.config"
+assert_not_symlink "/home/$USERNAME/.config/Code"
+assert_not_symlink "$config_dir"
 install -d -o "$USERNAME" -g "$USERNAME" "$config_dir"
+assert_not_symlink "$config_dir/settings.json"
 cat > "$config_dir/settings.json" <<'EOF'
 {"telemetry.telemetryLevel":"off"}
 EOF
 chown "$USERNAME:$USERNAME" "$config_dir/settings.json"
-runuser -u "$USERNAME" -- code --install-extension GitHub.copilot --force || true
+if [[ "$INSTALL_COPILOT" == "1" ]]; then
+  runuser -u "$USERNAME" -- code --install-extension GitHub.copilot --force || true
+fi
 
 install -d -m 755 /etc/firefox/policies
 cat > /etc/firefox/policies/policies.json <<'EOF'
@@ -115,19 +166,29 @@ cat > /etc/firefox/policies/policies.json <<'EOF'
 EOF
 
 if [[ ! -d "/home/$USERNAME/.nvm" ]]; then
-  runuser -u "$USERNAME" -- env HOME="/home/$USERNAME" bash -lc \
-    'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash'
+  assert_not_symlink "/home/$USERNAME/.nvm"
+  nvm_download_dir="$(mktemp -d /tmp/reak-nvm.XXXXXX)"
+  wget -q https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh \
+    -O "$nvm_download_dir/install.sh"
+  chmod 755 "$nvm_download_dir/install.sh"
+  runuser -u "$USERNAME" -- env HOME="/home/$USERNAME" bash "$nvm_download_dir/install.sh"
+  rm -rf "$nvm_download_dir"
 fi
 
 if ! command -v go >/dev/null 2>&1; then
   go_version="$(curl -fsSL https://go.dev/VERSION?m=text | head -n1)"
   [[ "$go_version" =~ ^go[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || die "Could not determine a valid Go release."
   log "Installing $go_version."
-  wget -q "https://go.dev/dl/${go_version}.linux-amd64.tar.gz" -O /tmp/go.tar.gz
+  go_download_dir="$(mktemp -d /tmp/reak-go.XXXXXX)"
+  go_archive="$go_download_dir/${go_version}.linux-amd64.tar.gz"
+  wget -q "https://go.dev/dl/${go_version}.linux-amd64.tar.gz" -O "$go_archive"
+  wget -q "https://go.dev/dl/${go_version}.linux-amd64.tar.gz.sha256" -O "$go_archive.sha256"
+  (cd "$go_download_dir" && sha256sum -c "${go_version}.linux-amd64.tar.gz.sha256")
   rm -rf /usr/local/go
-  tar -C /usr/local -xzf /tmp/go.tar.gz
-  rm -f /tmp/go.tar.gz
+  tar -C /usr/local -xzf "$go_archive"
+  rm -rf "$go_download_dir"
   for rcfile in .profile .bashrc .zshrc; do
+    assert_not_symlink "/home/$USERNAME/$rcfile"
     touch "/home/$USERNAME/$rcfile"
     grep -qxF 'export PATH="$PATH:/usr/local/go/bin:$HOME/go/bin"' "/home/$USERNAME/$rcfile" || \
       printf '\nexport PATH="$PATH:/usr/local/go/bin:$HOME/go/bin"\n' >> "/home/$USERNAME/$rcfile"
@@ -150,7 +211,7 @@ if [[ "$SKIP_FLEET" == "1" ]]; then
 fi
 
 set -Eeuo pipefail
-umask 022
+umask 077
 
 # ============================================================
 # Fleet Enrollment Setup (fixed)
@@ -264,15 +325,20 @@ fi
 step "4/7 — Preparing Package Workspace"
 
 if [[ "$EUID" -eq 0 ]]; then
-    WORK_ROOT="/var/tmp/fleet-enrollment-root"
-    install -d -o root -g root -m 0755 "$WORK_ROOT"
+    WORK_ROOT="$(mktemp -d /var/tmp/fleet-enrollment.XXXXXX)"
+    chown root:root "$WORK_ROOT"
 else
-    WORK_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/fleet-enrollment"
-    install -d -m 0700 "$WORK_ROOT"
+    install -d -m 700 "${XDG_CACHE_HOME:-$HOME/.cache}"
+    WORK_ROOT="$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/fleet-enrollment.XXXXXX")"
 fi
 
 [[ -d "$WORK_ROOT" && -w "$WORK_ROOT" ]] ||
     die "Temporary workspace is not writable: $WORK_ROOT"
+
+cleanup_fleet_workspace() {
+    [[ -n "${WORK_ROOT:-}" && -d "$WORK_ROOT" ]] && rm -rf -- "$WORK_ROOT"
+}
+trap cleanup_fleet_workspace EXIT
 
 export TMPDIR="$WORK_ROOT"
 log "TMPDIR=$TMPDIR"
@@ -300,12 +366,18 @@ rm -f fleet-osquery_*.deb
 
 log "Generating package for $FLEET_URL"
 
+fleet_package_args=(
+    --type=deb
+    --fleet-desktop
+    --fleet-url="$FLEET_URL"
+    --enroll-secret="$ENROLL_SECRET"
+)
+if [[ "$FLEET_ENABLE_SCRIPTS" == "1" ]]; then
+    fleet_package_args+=(--enable-scripts)
+fi
+
 if ! fleetctl package \
-        --type=deb \
-        --enable-scripts \
-        --fleet-desktop \
-        --fleet-url="$FLEET_URL" \
-        --enroll-secret="$ENROLL_SECRET"; then
+        "${fleet_package_args[@]}"; then
     unset ENROLL_SECRET
     die "Package generation failed."
 fi

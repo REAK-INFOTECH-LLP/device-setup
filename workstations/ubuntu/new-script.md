@@ -27,6 +27,9 @@ sudo ./workstations/ubuntu/setup.sh
 | `SKIP_FLEET` | No | `0` | Set to `1` to run baseline setup only and skip Fleet enrollment. |
 | `REAK_USERNAME` | No | `reak` | Workstation user account to create/use. |
 | `REAK_SSH_USER` | No | `administrator` | Account allowed to SSH. |
+| `DOCKER_GROUP_ACCESS` | No | `0` | Set to `1` to add the user to Docker's root-equivalent group. |
+| `FLEET_ENABLE_SCRIPTS` | No | `0` | Set to `1` only if Fleet script execution is intentionally required. |
+| `INSTALL_COPILOT` | No | `0` | Set to `1` to install GitHub Copilot; it is not installed by default. |
 
 Examples:
 
@@ -42,6 +45,9 @@ export REAK_SSH_USER="administrator"
 export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
 export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
 export SKIP_FLEET="0"
+export DOCKER_GROUP_ACCESS="0"
+export FLEET_ENABLE_SCRIPTS="0"
+export INSTALL_COPILOT="0"
 ```
 
 Baseline only (skip Fleet):
@@ -99,28 +105,44 @@ Do not store `ENROLL_SECRET` in shell history or the repository.
   invalid key stops the script early.
 - Writes the key to the administrator's `~/.ssh/authorized_keys` with `700/600`
   permissions.
-- Sets in `sshd_config`:
+- Writes `/etc/ssh/sshd_config.d/00-reak.conf` so the settings take priority
+  over common cloud-init drop-ins and do not depend on where the main config
+  file ends:
   - `PasswordAuthentication no`
+  - `KbdInteractiveAuthentication no`
   - `PermitRootLogin no`
   - `AllowUsers administrator`
-- Backs up the config (`sshd_config.reak-backup`), runs `sshd -t`, then enables
-  and restarts SSH.
+- Runs `sshd -t` and checks the effective values with `sshd -T` before enabling
+  and reloading SSH. A failed validation restores the previous drop-in.
+- Preserves existing authorized keys instead of replacing the file. It refuses
+  to write through symlinks in SSH and user configuration paths.
 
 Result: only `administrator` can SSH, using a key; password/root login is off.
 
 ## Phase 5 — Docker
 
 - Installs Docker via the official script if missing.
-- Adds `reak` to the `docker` group.
+- Installs Docker. `DOCKER_GROUP_ACCESS=1` is required to add `reak` to the
+  Docker group because Docker group membership is equivalent to root.
 
 ## Phase 6 — Apps and tooling
 
 - Installs Chrome, Bruno (pinned), and VS Code if missing.
-- Disables VS Code telemetry and installs the Copilot extension.
+- Disables VS Code telemetry. Copilot installation is opt-in with `INSTALL_COPILOT=1`.
 - Applies a Firefox policy that force-installs uBlock Origin.
 - Installs NVM for `reak`.
 - Installs the latest Go release and adds it to PATH files.
 - Installs `opkssh`.
+- Uses private temporary directories for downloaded packages and verifies the
+  Go archive against the checksum published by `go.dev`.
+
+### Installer trust
+
+Docker, Fleet CLI, and NVM still use vendor-provided installer scripts, and
+Chrome, Bruno, VS Code, and opkssh are downloaded from their vendor URLs. Review
+and pin those sources in a controlled deployment if the workstation is exposed
+to a high-threat environment; a URL download alone is not a cryptographic
+signature verification.
 
 ## Phase 7 — Fleet enrollment
 
@@ -134,9 +156,15 @@ Otherwise it runs these 7 steps:
    it unchanged and exits.
 4. **Workspace** — prepares a temporary directory for package generation.
 5. **Secret** — uses `ENROLL_SECRET`, prompting on a terminal when needed.
-6. **Package** — generates the agent with
-   `fleetctl package --type=deb --enable-scripts --fleet-desktop ...`.
+   The interactive prompt is preferred. The Fleet CLI requires the secret as a
+   command argument while generating the package, so it may briefly be visible
+   to local process inspection.
+6. **Package** — generates the agent with `fleetctl package --type=deb`
+   and `--fleet-desktop`. The high-risk `--enable-scripts` option is only added
+   when `FLEET_ENABLE_SCRIPTS=1`.
 7. **Install** — installs the `.deb`, then deletes the temporary package file.
+   The workspace is mode `0700` and is removed by an exit trap, including on
+   failure.
 
 Then it:
 
