@@ -7,12 +7,15 @@ set -euo pipefail
 USERNAME="${REAK_USERNAME:-reak}"
 SSH_USER="${REAK_SSH_USER:-administrator}"
 SSH_PUB_KEY="${SSH_PUB_KEY:-}"
+SKIP_FLEET="${SKIP_FLEET:-0}"
 
 log() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
 [[ "${EUID}" -eq 0 ]] || die "Run this script with sudo/root."
 command -v apt-get >/dev/null || die "This script supports Debian-based Ubuntu systems only."
+ARCH="$(dpkg --print-architecture)"
+[[ "$ARCH" == "amd64" ]] || die "This script supports amd64 only; found $ARCH."
 id "$SSH_USER" >/dev/null 2>&1 || die "Required SSH account '$SSH_USER' does not exist."
 [[ -n "$SSH_PUB_KEY" ]] || die "Set SSH_PUB_KEY to the approved administrator public key."
 
@@ -27,7 +30,16 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   ca-certificates curl wget git gnupg software-properties-common \
   apt-transport-https zsh make build-essential python3-pip \
-  python3-virtualenv vlc firefox openssh-server gdebi-core
+  python3-virtualenv vlc firefox openssh-server openssh-client gdebi-core
+
+log "Validating SSH public key before changing SSH configuration."
+key_tmp="$(mktemp)"
+printf '%s\n' "$SSH_PUB_KEY" > "$key_tmp"
+if ! ssh-keygen -l -f "$key_tmp" >/dev/null 2>&1; then
+  rm -f "$key_tmp"
+  die "SSH_PUB_KEY is not a valid SSH public key."
+fi
+rm -f "$key_tmp"
 
 log "Configuring key-based SSH for '$SSH_USER'."
 ssh_dir="/home/$SSH_USER/.ssh"
@@ -130,8 +142,13 @@ if [[ ! -x /usr/local/bin/opkssh ]]; then
   chmod 755 /usr/local/bin/opkssh
 fi
 
-log "Baseline setup complete. Reboot the workstation, then enroll it in Fleet using the documented procedure."
-#!/usr/bin/env bash
+log "Baseline setup complete. Continuing with Fleet enrollment."
+
+if [[ "$SKIP_FLEET" == "1" ]]; then
+  log "Skipping Fleet enrollment (SKIP_FLEET=1)."
+  exit 0
+fi
+
 set -Eeuo pipefail
 umask 022
 
@@ -308,6 +325,8 @@ step "7/7 — Installing Fleet Agent"
 
 as_root apt-get install -y "$PACKAGE_PATH"
 success "Package installation completed."
+rm -f "$PACKAGE_PATH"
+log "Removed temporary package: $PACKAGE_PATH"
 
 # ---------- Start and verify ----------
 step "Starting and Verifying Agent"
@@ -336,7 +355,7 @@ printf '%b\n' "${GREEN}${BOLD}╚═══════════════�
 
 success "Hostname: $(hostname)"
 success "Orbit service: active"
-success "Package: $PACKAGE_PATH"
+success "Temporary Fleet package installed and removed."
 log "Dashboard: $FLEET_URL/hosts/manage"
 log "Logs: sudo journalctl -u orbit -n 100 --no-pager"
 warn "Verify the host appears in Fleet; an active service alone does not prove enrollment."

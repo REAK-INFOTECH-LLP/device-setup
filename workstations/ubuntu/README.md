@@ -1,17 +1,17 @@
 # Ubuntu workstation setup
 
-REAK Linux workstations are managed in Fleet. The bootstrap script installs the baseline tools from the former setup procedure; Fleet enrollment is a separate step.
+REAK Linux workstations are managed in Fleet. The bootstrap script installs the baseline tools and then enrolls the host in Fleet, unless enrollment is skipped.
 
 ## Requirements
 
 - A supported Ubuntu desktop install with internet access. The OS installation creates the `administrator` account with `sudo` access.
 - A REAK-approved SSH public key value. The script does not include a personal key or set a shared default password.
-- `fleetctl` for generating the Fleet agent package.
-- Fleet enrollment secret from an authorized Fleet administrator. Do not put it in this repository or shell history.
+- Network access to `https://fleet.reak.in` and Fleet download endpoints. The script installs `fleetctl` when needed.
+- Fleet enrollment secret from an authorized Fleet administrator. Do not put it in this repository or shell history. If Orbit is already active, enrollment is skipped.
 
 ## Bootstrap
 
-Review `setup.sh`, then run it from a local checkout:
+Review `setup.sh`, then run it from a local checkout. The script performs the baseline setup and then continues with Fleet enrollment, unless `SKIP_FLEET=1` is set.
 
 ```sh
 sudo ./workstations/ubuntu/setup.sh
@@ -25,32 +25,19 @@ Provide the SSH public key via `SSH_PUB_KEY` in the environment when running the
 sudo env SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)" ./workstations/ubuntu/setup.sh
 ```
 
+On a terminal, the script prompts for the Fleet enrollment secret when enrollment is needed. For non-interactive runs, supply `ENROLL_SECRET` to the privileged environment without storing it in shell history, or run baseline setup only with `SKIP_FLEET=1`:
+
+```sh
+sudo env SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)" SKIP_FLEET=1 ./workstations/ubuntu/setup.sh
+```
+
 Only the `administrator` account is allowed to SSH. Password authentication and root login are disabled. The account is created during OS installation. Ensure the key and Headscale connectivity work before closing any existing remote session.
 
 ## Fleet enrollment
 
-The previous command used `--type=pkg`, which creates a macOS installer. Ubuntu requires a Debian package (`deb`). Generate the Fleet agent package with the Linux option and your secret supplied interactively so it is not saved in shell history:
+Fleet enrollment is integrated into `setup.sh`. After the baseline setup, the script installs `fleetctl` if needed, generates an Ubuntu `deb` agent package, installs it, enables the Orbit service, and checks Fleet connectivity. The temporary generated package is removed after installation.
 
-```sh
-fleetctl package --type=pkg --enable-scripts --fleet-desktop --fleet-url=https://fleet.reak.in --enroll-secret=6PYu3/JIshDzhzxuoc9HDIkrImvoo1IQ
-```
-
-The command above uses `pkg`, which Fleet documents for macOS. For Ubuntu, change the package type to `deb`, then install the generated `.deb` on the workstation:
-
-```sh
-fleetctl package --type=deb --enable-scripts --fleet-desktop --fleet-url=https://fleet.reak.in --enroll-secret="$FLEET_ENROLL_SECRET"
-sudo apt install ./fleet-osquery_*.deb
-```
-
-Set `FLEET_ENROLL_SECRET` in the current shell before running the Ubuntu command. For an interactive prompt that avoids shell history:
-
-```sh
-read -rsp 'Fleet enrollment secret: ' FLEET_ENROLL_SECRET; printf '\n'
-fleetctl package --type=deb --enable-scripts --fleet-desktop --fleet-url=https://fleet.reak.in --enroll-secret="$FLEET_ENROLL_SECRET"
-unset FLEET_ENROLL_SECRET
-```
-
-Check the generated filename and Fleet UI host inventory to confirm enrollment. Fleet's UI also provides platform-specific enrollment commands under **Hosts → Add hosts**. See [Fleet's enrollment guide](https://fleetdm.com/guides/enroll-hosts#ui) for current options. Fleet documents `deb` for Debian-based Linux, `pkg` for macOS, and `--fleet-desktop` as the option to include Fleet Desktop.
+Confirm the host appears in Fleet under **Hosts → Manage hosts**. An active Orbit service alone does not prove successful enrollment.
 
 ## Known limitations / follow-up
 
