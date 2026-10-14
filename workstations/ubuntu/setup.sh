@@ -74,9 +74,17 @@ if [[ -e "$sshd_dropin" ]]; then
 fi
 sshd_dropin_tmp="$(mktemp "$sshd_dropin_dir/00-reak.conf.XXXXXX")"
 chmod 644 "$sshd_dropin_tmp"
+# KbdInteractiveAuthentication exists only in OpenSSH 8.7+ (Ubuntu 22.04+).
+# Older releases such as Ubuntu 20.04 only know ChallengeResponseAuthentication,
+# and reject the newer keyword, so probe support first.
+if sshd -T 2>/dev/null | grep -qi '^kbdinteractiveauthentication'; then
+  kbd_setting="KbdInteractiveAuthentication no"
+else
+  kbd_setting="ChallengeResponseAuthentication no"
+fi
 cat > "$sshd_dropin_tmp" <<EOF
 PasswordAuthentication no
-KbdInteractiveAuthentication no
+$kbd_setting
 PermitRootLogin no
 PubkeyAuthentication yes
 AllowUsers $SSH_USER
@@ -85,16 +93,33 @@ if ! mv -f "$sshd_dropin_tmp" "$sshd_dropin"; then
   rm -f "$sshd_dropin_tmp"
   die "Could not install SSH hardening drop-in."
 fi
-if ! sshd -t || ! sshd -T | grep -Eq "^passwordauthentication no$" || \
-   ! sshd -T | grep -Eq "^kbdinteractiveauthentication no$" || \
-   ! sshd -T | grep -Eq "^permitrootlogin no$" || \
-   ! sshd -T | grep -Eq "^allowusers $SSH_USER$"; then
+restore_sshd_dropin() {
   if [[ -n "$sshd_dropin_backup" ]]; then
     cp -p "$sshd_dropin_backup" "$sshd_dropin"
   else
     rm -f "$sshd_dropin"
   fi
-  rm -f "$sshd_dropin_backup"
+  [[ -z "$sshd_dropin_backup" ]] || rm -f "$sshd_dropin_backup"
+}
+sshd_err="$(mktemp)"
+if ! sshd -t 2>"$sshd_err"; then
+  sshd_err_msg="$(cat "$sshd_err")"
+  rm -f "$sshd_err"
+  restore_sshd_dropin
+  die "sshd -t failed: $sshd_err_msg"
+fi
+if ! sshd_effective="$(sshd -T 2>"$sshd_err")"; then
+  sshd_err_msg="$(cat "$sshd_err")"
+  rm -f "$sshd_err"
+  restore_sshd_dropin
+  die "sshd -T failed, cannot verify effective settings: $sshd_err_msg"
+fi
+rm -f "$sshd_err"
+if ! grep -Eq "^passwordauthentication no$" <<<"$sshd_effective" || \
+   ! grep -Eqi "^(kbdinteractiveauthentication|challengeresponseauthentication) no$" <<<"$sshd_effective" || \
+   ! grep -Eq "^permitrootlogin no$" <<<"$sshd_effective" || \
+   ! grep -Eq "^allowusers $SSH_USER$" <<<"$sshd_effective"; then
+  restore_sshd_dropin
   die "Effective SSH configuration did not pass hardening checks."
 fi
 [[ -z "$sshd_dropin_backup" ]] || rm -f "$sshd_dropin_backup"
