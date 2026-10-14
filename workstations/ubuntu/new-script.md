@@ -40,6 +40,32 @@ Baseline only (skip Fleet):
 sudo env SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)" SKIP_FLEET=1 ./workstations/ubuntu/setup.sh
 ```
 
+## Full run from GitHub raw URL (with export)
+
+```sh
+export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
+export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
+# Optional:
+# export SKIP_FLEET=1
+# export REAK_USERNAME=reak
+# export REAK_SSH_USER=administrator
+
+curl -fsSL https://raw.githubusercontent.com/REAK-INFOTECH-LLP/device-setup/feature/setup-fleet-enrollment/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
+chmod +x /tmp/reak-setup.sh
+sudo -E /tmp/reak-setup.sh
+```
+
+Baseline only from raw URL (no Fleet secret needed):
+
+```sh
+export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
+export SKIP_FLEET=1
+
+curl -fsSL https://raw.githubusercontent.com/REAK-INFOTECH-LLP/device-setup/feature/setup-fleet-enrollment/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
+chmod +x /tmp/reak-setup.sh
+sudo -E /tmp/reak-setup.sh
+```
+
 Do not store `ENROLL_SECRET` in shell history or the repository.
 
 ## Phase 1 — Safety checks
