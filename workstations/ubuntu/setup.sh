@@ -411,8 +411,14 @@ if [[ "$FLEET_ENABLE_SCRIPTS" == "1" ]]; then
     fleet_package_args+=(--enable-scripts)
 fi
 
-if ! fleetctl package \
-        "${fleet_package_args[@]}"; then
+if ! (
+    # fleetctl creates its package directories expecting the default umask
+    # (0755 dirs). The workspace itself stays mode 0700, so run only the
+    # generator under umask 022 in a subshell; the outer umask 077 is kept.
+    umask 022
+    fleetctl package \
+        "${fleet_package_args[@]}"
+); then
     unset ENROLL_SECRET
     die "Package generation failed."
 fi
