@@ -28,7 +28,7 @@ sudo ./workstations/ubuntu/setup.sh
 | `REAK_USERNAME` | No | `reak` | Workstation user account to create/use. |
 | `REAK_SSH_USER` | No | `administrator` | Account allowed to SSH. |
 | `DOCKER_GROUP_ACCESS` | No | `0` | Set to `1` to add the user to Docker's root-equivalent group. |
-| `FLEET_ENABLE_SCRIPTS` | No | `0` | Set to `1` only if Fleet script execution is intentionally required. |
+| `FLEET_ENABLE_SCRIPTS` | No | `1` | Set to `0` to disable Fleet script execution on hosts. |
 | `INSTALL_COPILOT` | No | `0` | Set to `1` to install GitHub Copilot; it is not installed by default. |
 
 Examples:
@@ -159,9 +159,9 @@ Otherwise it runs these 7 steps:
    The interactive prompt is preferred. The Fleet CLI requires the secret as a
    command argument while generating the package, so it may briefly be visible
    to local process inspection.
-6. **Package** — generates the agent with `fleetctl package --type=deb`
-   and `--fleet-desktop`. The high-risk `--enable-scripts` option is only added
-   when `FLEET_ENABLE_SCRIPTS=1`.
+6. **Package** — generates the agent with `fleetctl package --type=deb`,
+   `--fleet-desktop`, and `--enable-scripts` (set `FLEET_ENABLE_SCRIPTS=0`
+   to skip it).
 7. **Install** — installs the `.deb`, then deletes the temporary package file.
    The workspace is mode `0700` and is removed by an exit trap, including on
    failure.
