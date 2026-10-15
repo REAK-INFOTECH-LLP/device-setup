@@ -206,6 +206,21 @@ if [[ ! -d "/home/$USERNAME/.nvm" ]]; then
   rm -rf "$nvm_download_dir"
 fi
 
+# The NVM installer only wires bash files, so zsh and login shells would
+# otherwise lack the `nvm` command. Ensure sourcing in every interactive
+# startup file (idempotent; also repairs hosts installed before this fix).
+nvm_source_block='export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion'
+for nvm_rc in .bashrc .profile .zshrc; do
+  nvm_rcfile="/home/$USERNAME/$nvm_rc"
+  assert_not_symlink "$nvm_rcfile"
+  touch "$nvm_rcfile"
+  grep -qxF 'export NVM_DIR="$HOME/.nvm"' "$nvm_rcfile" || printf '\n%s\n' "$nvm_source_block" >> "$nvm_rcfile"
+  chown "$USERNAME:$USERNAME" "$nvm_rcfile"
+done
+log 'NVM is wired into .bashrc, .profile and .zshrc. Open a new shell (or run: export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh") to use `nvm`.'
+
 if ! command -v go >/dev/null 2>&1; then
   go_version="$(curl -fsSL https://go.dev/VERSION?m=text | head -n1)"
   [[ "$go_version" =~ ^go[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || die "Could not determine a valid Go release."
