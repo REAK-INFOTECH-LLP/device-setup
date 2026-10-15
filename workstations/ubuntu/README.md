@@ -35,7 +35,7 @@ Only the `administrator` account is allowed to SSH. Password and keyboard-intera
 
 ## Fleet enrollment
 
-Fleet enrollment is integrated into `setup.sh`. After the baseline setup, the script installs `fleetctl` if needed, generates an Ubuntu `deb` agent package, installs it, enables the Orbit service, and checks Fleet connectivity. The package workspace is private and removed on exit, including failure. `--enable-scripts` is disabled by default; set `FLEET_ENABLE_SCRIPTS=1` only when Fleet script execution is deliberately approved.
+Fleet enrollment is integrated into `setup.sh`. After the baseline setup, the script installs `fleetctl` if needed, generates an Ubuntu `deb` agent package, installs it, enables the Orbit service, and checks Fleet connectivity. The package workspace is private and removed on exit, including failure. `--enable-scripts` is enabled by default; set `FLEET_ENABLE_SCRIPTS=0` to disable Fleet script execution on hosts.
 
 The interactive secret prompt is preferred. Fleet's package command requires the secret as a command-line argument while generating the package, so it may briefly be visible to local process inspection. Rotate the secret if it is ever exposed.
 
