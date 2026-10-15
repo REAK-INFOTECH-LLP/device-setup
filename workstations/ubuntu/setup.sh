@@ -74,6 +74,9 @@ if [[ -e "$sshd_dropin" ]]; then
 fi
 sshd_dropin_tmp="$(mktemp "$sshd_dropin_dir/00-reak.conf.XXXXXX")"
 chmod 644 "$sshd_dropin_tmp"
+# sshd -t/-T require the privilege separation directory, which may not exist
+# yet on systems where openssh-server was just installed and never started.
+install -d -m 0755 /run/sshd
 # KbdInteractiveAuthentication exists only in OpenSSH 8.7+ (Ubuntu 22.04+).
 # Older releases such as Ubuntu 20.04 only know ChallengeResponseAuthentication,
 # and reject the newer keyword, so probe support first.
@@ -486,9 +489,13 @@ fi
 
 step "Connectivity Check"
 
-if curl -fsS --connect-timeout 5 --max-time 15 \
-    "$FLEET_URL/api/v1/fleet/status" >/dev/null; then
-    success "Fleet status endpoint is reachable over HTTPS."
+# Any HTTP response (even 401/404) proves the server is reachable over TLS.
+# Only a connection failure (code 000) is a real problem; orbit's own
+# authentication check above is the true enrollment signal.
+fleet_http_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 \
+    "$FLEET_URL/api/v1/fleet/status" 2>/dev/null || echo "000")"
+if [[ "$fleet_http_code" != "000" ]]; then
+    success "Fleet server responded over HTTPS (HTTP $fleet_http_code)."
 else
     warn "Fleet API check failed; check DNS, TLS, proxy and server availability."
 fi
