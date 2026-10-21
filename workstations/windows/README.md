@@ -128,16 +128,9 @@ The Fleet CLI requires the secret as a command-line argument while generating th
 
 ## Checks
 
-The scripts are checked in a container that carries PowerShell and PSScriptAnalyzer.
+Before any change, the scripts are checked with the PowerShell parser, PSScriptAnalyzer, the Windows PowerShell 5.1 compatibility rules, unit tests for the platform independent helpers, and mocked end-to-end runs of `setup.ps1` and `rollback.ps1` in a PowerShell container. The mocked runs cover the baseline, the Fleet enrollment, a pre-generated package, a host that is already enrolled, a rejected `sshd -t`, a rejected hardening check, and the rollback.
 
-```sh
-docker build -f workstations/windows/tests/Dockerfile -t reak-windows-checks .
-docker run --rm reak-windows-checks
-```
-
-The run covers the PowerShell parser, PSScriptAnalyzer, the Windows PowerShell 5.1 compatibility rules, unit tests for the platform independent helpers, and seven mocked scenarios of `setup.ps1` and `rollback.ps1`: the baseline run, the Fleet enrollment, a pre-generated package, a host that is already enrolled, a rejected `sshd -t`, a rejected hardening check, and the rollback. The mocked scenarios use the Windows cmdlets as stubs, so the container checks the control flow and the failure handling, not the Windows APIs.
-
-A Windows container cannot be used for this: the Windows images need a Windows host kernel, so `docker run mcr.microsoft.com/windows/servercore` fails with `no matching manifest for linux/amd64`. Running the bootstrap on real Windows hardware is still required before it is used in production.
+The harness is kept out of this repository. It stubs the Windows APIs, so it proves the control flow and the failure handling but not the Windows calls themselves, and a Windows container cannot close that gap because the Windows images need a Windows host kernel. Running the bootstrap on real Windows hardware is still required before it is used in production.
 
 ## Rollback
 
