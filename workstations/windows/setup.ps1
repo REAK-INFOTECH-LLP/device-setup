@@ -755,8 +755,22 @@ if (Test-Path -LiteralPath $sshUserProfile) {
     Write-WarnMessage "Profile directory '$sshUserProfile' does not exist yet; only the ProgramData key file was written."
 }
 
-# Host keys must exist before sshd can validate its configuration.
+# Host keys must exist before sshd can start.
 Invoke-Native -FilePath $sshKeygenExe -ArgumentList @('-A') | Out-Null
+
+# Clean up corrupted logs directory if it exists (known Windows OpenSSH bug where
+# inherited ACEs cause sshd to crash on startup with Error 1067).
+$sshLogsDir = Join-Path $sshDir 'logs'
+if (Test-Path -LiteralPath $sshLogsDir) {
+    Remove-Item -LiteralPath $sshLogsDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Ensure ProgramData\ssh folder and its host keys / config files have strict ACLs.
+# OpenSSH strictly rejects starting if unprivileged users have write access.
+Set-RestrictedAcl -Path $sshDir -AllowedSids @($script:SystemSid, $script:AdministratorsSid)
+Get-ChildItem -LiteralPath $sshDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+    Set-RestrictedAcl -Path $_.FullName -AllowedSids @($script:SystemSid, $script:AdministratorsSid)
+}
 
 $sshdConfigOriginal = "$sshdConfig.reak.orig"
 if (-not (Test-Path -LiteralPath $sshdConfigOriginal) -and (Test-Path -LiteralPath $sshdConfig)) {
@@ -845,7 +859,41 @@ if (-not (Get-Service -Name 'sshd' -ErrorAction SilentlyContinue)) {
     Stop-WithError 'The sshd service was not created by the OpenSSH Server capability.'
 }
 Set-Service -Name 'sshd' -StartupType Automatic -ErrorAction SilentlyContinue
-Restart-Service -Name 'sshd' -ErrorAction Stop
+
+# Restart or start the sshd service with retries and diagnostic reporting.
+$serviceStarted = $false
+$maxServiceAttempts = 3
+for ($attempt = 1; $attempt -le $maxServiceAttempts; $attempt++) {
+    try {
+        Restart-Service -Name 'sshd' -Force -ErrorAction Stop
+        $serviceStarted = $true
+        break
+    } catch {
+        Write-Info "Restart-Service attempt $attempt failed ($($_.Exception.Message)). Retrying with Start-Service..."
+        Start-Sleep -Seconds 2
+        try {
+            Start-Service -Name 'sshd' -ErrorAction Stop
+            $serviceStarted = $true
+            break
+        } catch {
+            if ($attempt -lt $maxServiceAttempts) {
+                # Attempt to repair file permissions on ProgramData\ssh before next try
+                Set-RestrictedAcl -Path $sshDir -AllowedSids @($script:SystemSid, $script:AdministratorsSid)
+                Get-ChildItem -LiteralPath $sshDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    Set-RestrictedAcl -Path $_.FullName -AllowedSids @($script:SystemSid, $script:AdministratorsSid)
+                }
+                Start-Sleep -Seconds 3
+            }
+        }
+    }
+}
+
+if (-not $serviceStarted) {
+    # Run sshd in debug mode to extract the exact reason why Windows refused to start it.
+    $diag = Invoke-Native -FilePath $sshdExe -ArgumentList @('-d')
+    $diagOutput = ($diag.Output -join ' ')
+    Stop-WithError "Failed to start OpenSSH SSH Server (sshd). Diagnostic output: $diagOutput"
+}
 Write-Ok 'OpenSSH server started and set to start automatically.'
 
 try {
