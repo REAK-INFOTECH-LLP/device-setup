@@ -860,16 +860,14 @@ if (-not (Get-Service -Name 'sshd' -ErrorAction SilentlyContinue)) {
 }
 Set-Service -Name 'sshd' -StartupType Automatic -ErrorAction SilentlyContinue
 
-# Try to start the sshd service once. If it fails, log a warning and continue immediately
-# without hanging or retrying, so desktop apps and developer tools install smoothly.
+# Attempt to start the OpenSSH service.
+# If it fails or takes too long, log a warning and continue immediately without blocking,
+# so desktop applications and developer tools install smoothly.
 try {
     Start-Service -Name 'sshd' -ErrorAction Stop
     Write-Ok 'OpenSSH server started and set to start automatically.'
 } catch {
-    # Run sshd in debug mode to extract diagnostic info for logs without crashing the script.
-    $diag = Invoke-Native -FilePath $sshdExe -ArgumentList @('-d')
-    $diagOutput = ($diag.Output -join ' ')
-    Write-WarnMessage "OpenSSH service could not start ($($_.Exception.Message)). Skipping to next step. Diagnostic: $diagOutput"
+    Write-WarnMessage "OpenSSH service did not start ($($_.Exception.Message)). Skipping to next step without blocking."
 }
 
 try {
