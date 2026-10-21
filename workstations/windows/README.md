@@ -128,7 +128,7 @@ The Fleet CLI requires the secret as a command-line argument while generating th
 
 ## Checks
 
-Before any change, the scripts are checked with the PowerShell parser, PSScriptAnalyzer, the Windows PowerShell 5.1 compatibility rules, unit tests for the platform independent helpers, and mocked end-to-end runs of `setup.ps1` and `rollback.ps1` in a PowerShell container. The mocked runs cover the baseline, the Fleet enrollment, a pre-generated package, a host that is already enrolled, a rejected `sshd -t`, a rejected hardening check, and the rollback.
+Before any change, the scripts are checked with the PowerShell parser, PSScriptAnalyzer, the Windows PowerShell 5.1 compatibility rules, unit tests for the platform independent helpers, and mocked end-to-end runs of `setup.ps1` and `rollback.ps1` in a PowerShell container. The mocked runs cover the baseline, the Fleet enrollment, a pre-generated package, a host that is already enrolled, a rejected `sshd -t`, a rejected hardening check, an OpenSSH that is too old for `KbdInteractiveAuthentication`, and the rollback.
 
 The harness is kept out of this repository. It stubs the Windows APIs, so it proves the control flow and the failure handling but not the Windows calls themselves, and a Windows container cannot close that gap because the Windows images need a Windows host kernel. Running the bootstrap on real Windows hardware is still required before it is used in production.
 

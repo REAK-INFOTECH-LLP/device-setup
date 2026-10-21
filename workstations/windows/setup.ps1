@@ -207,8 +207,10 @@ function New-TemporaryWorkspace {
     Invoke-Native -FilePath 'icacls.exe' -ArgumentList @(
         $path,
         '/inheritance:r',
-        "/grant:*${currentSid}:(OI)(CI)F",
-        "/grant:*$($script:SystemSid):(OI)(CI)F"
+        '/grant',
+        "*${currentSid}:(OI)(CI)F",
+        '/grant',
+        "*$($script:SystemSid):(OI)(CI)F"
     ) | Out-Null
     return $path
 }
@@ -339,9 +341,21 @@ public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wP
 }
 
 function Get-LocalGroupBySid {
+    <#
+        Return the plain name of a local group. The LocalAccounts cmdlets want
+        the local name, not the qualified "BUILTIN\Administrators" form that
+        an SID translation produces.
+    #>
     param([Parameter(Mandatory = $true)][string] $Sid)
+    try {
+        $group = Get-LocalGroup -SID $Sid -ErrorAction Stop
+        if ($group.Name) { return $group.Name }
+    } catch {
+        # Fall back to the SID translation below.
+    }
     $identity = New-Object Security.Principal.SecurityIdentifier($Sid)
-    return $identity.Translate([Security.Principal.NTAccount]).Value
+    $qualified = $identity.Translate([Security.Principal.NTAccount]).Value
+    return ($qualified -split '\\')[-1]
 }
 
 function Set-RestrictedAcl {
@@ -355,9 +369,14 @@ function Set-RestrictedAcl {
         [Parameter(Mandatory = $true)][string] $Path,
         [Parameter(Mandatory = $true)][string[]] $AllowedSids
     )
+    # icacls wants "/grant" and the access control entry as separate
+    # arguments. "/grant:<ace>" is rejected with "Invalid parameter". The SID
+    # needs the asterisk prefix, otherwise icacls tries to resolve it as a
+    # name and fails on a localized Windows.
     $arguments = @($Path, '/inheritance:r')
     foreach ($sidValue in $AllowedSids) {
-        $arguments += "/grant:*${sidValue}:(F)"
+        $arguments += '/grant'
+        $arguments += "*${sidValue}:F"
     }
     $result = Invoke-Native -FilePath 'icacls.exe' -ArgumentList $arguments
     if ($result.ExitCode -ne 0) {
@@ -374,6 +393,91 @@ function Set-FileOwner {
     $acl = Get-Acl -LiteralPath $Path
     $acl.SetOwner((New-Object Security.Principal.NTAccount($owner)))
     Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Set-PasswordExpired {
+    <#
+        Mark an account so Windows asks for a new password at the next logon.
+        The ADSI WinNT provider does not implement PasswordExpired, so the
+        account flags are read and written with NetUserGetInfo and
+        NetUserSetInfo instead. UF_SCRIPT has to be set together with
+        UF_PASSWORD_EXPIRED, and the existing flags are preserved.
+    #>
+    param([Parameter(Mandatory = $true)][string] $Name)
+
+    if (-not ('Reak.NetUser' -as [type])) {
+        Add-Type -Namespace 'Reak' -Name 'NetUser' -ErrorAction Stop -MemberDefinition @'
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct USER_INFO_1
+{
+    [MarshalAs(UnmanagedType.LPWStr)] public string Name;
+    [MarshalAs(UnmanagedType.LPWStr)] public string Password;
+    public uint PasswordAge;
+    public uint Privilege;
+    [MarshalAs(UnmanagedType.LPWStr)] public string HomeDir;
+    [MarshalAs(UnmanagedType.LPWStr)] public string Comment;
+    public uint Flags;
+    [MarshalAs(UnmanagedType.LPWStr)] public string ScriptPath;
+    public uint AuthFlags;
+    [MarshalAs(UnmanagedType.LPWStr)] public string FullName;
+    [MarshalAs(UnmanagedType.LPWStr)] public string UsrComment;
+    [MarshalAs(UnmanagedType.LPWStr)] public string Parms;
+    [MarshalAs(UnmanagedType.LPWStr)] public string Workstations;
+    public uint MaxLogonHours;
+    public uint LogonHours;
+}
+
+public static class NetUserApi
+{
+    [DllImport("netapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern uint NetUserGetInfo(string serverName, string userName, int level, out IntPtr info, int bufferSize, out int errorCode, out int entriesRead, out int totalEntries);
+
+    [DllImport("netapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern uint NetUserSetInfo(string serverName, string userName, int level, ref USER_INFO_1 info, int bufferSize);
+
+    [DllImport("netapi32.dll", SetLastError = true)]
+    public static extern uint NetApiBufferFree(IntPtr buffer);
+}
+'@
+    }
+
+    $buffer = [IntPtr]::Zero
+    $errorCode = 0
+    $entriesRead = 0
+    $totalEntries = 0
+    $result = [Reak.NetUserApi]::NetUserGetInfo($null, $Name, 1, [ref]$buffer, 0, [ref]$errorCode, [ref]$entriesRead, [ref]$totalEntries)
+    if ($result -ne 0) {
+        throw "NetUserGetInfo failed with error $result."
+    }
+    try {
+        $current = [Runtime.InteropServices.Marshal]::PtrToStructure($buffer, [type][Reak.NetUserApi+USER_INFO_1])
+        $updated = New-Object Reak.NetUserApi+USER_INFO_1
+        $updated.Name = $current.Name
+        $updated.Password = $current.Password
+        $updated.PasswordAge = $current.PasswordAge
+        $updated.Privilege = $current.Privilege
+        $updated.HomeDir = $current.HomeDir
+        $updated.Comment = $current.Comment
+        # UF_SCRIPT (0x1) and UF_PASSWORD_EXPIRED (0x80000000).
+        $updated.Flags = $current.Flags -bor 0x00000001 -bor 0x80000000
+        $updated.ScriptPath = $current.ScriptPath
+        $updated.AuthFlags = $current.AuthFlags
+        $updated.FullName = $current.FullName
+        $updated.UsrComment = $current.UsrComment
+        $updated.Parms = $current.Parms
+        $updated.Workstations = $current.Workstations
+        $updated.MaxLogonHours = $current.MaxLogonHours
+        $updated.LogonHours = $current.LogonHours
+
+        $setResult = [Reak.NetUserApi]::NetUserSetInfo($null, $Name, 1, [ref]$updated, -1)
+        if ($setResult -ne 0) {
+            throw "NetUserSetInfo failed with error $setResult."
+        }
+    } finally {
+        if ($buffer -ne [IntPtr]::Zero) {
+            [void][Reak.NetUserApi]::NetApiBufferFree($buffer)
+        }
+    }
 }
 
 function Test-Administrator {
@@ -538,12 +642,10 @@ if (-not $workstationUser) {
     New-LocalUser -Name $Username -Password $securePassword -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword:$false -Description 'REAK workstation account' | Out-Null
     # Mark the password as expired so Windows asks for a new one at first logon.
     try {
-        $adsiUser = [ADSI] "WinNT://./$Username,user"
-        $adsiUser.PasswordExpired = $true
-        $adsiUser.SetInfo()
+        Set-PasswordExpired -Name $Username
         Write-Ok "Account '$Username' created. The password must be changed at first logon."
     } catch {
-        Write-WarnMessage "Could not force a password change for '$Username' ($($_.Exception.Message))."
+        Write-WarnMessage "Could not force a password change for '$Username' ($($_.Exception.Message)). The random password is unknown, so the account stays locked until an administrator sets one with: net user $Username <password>"
     }
 } else {
     Write-Ok "Account '$Username' already exists."
@@ -620,7 +722,12 @@ if ($existingKeys -notcontains $sshPubKey) {
 }
 Set-Content -LiteralPath $adminKeysFile -Value $existingKeys -Encoding ASCII
 Set-RestrictedAcl -Path $adminKeysFile -AllowedSids @($script:SystemSid, $script:AdministratorsSid)
-Set-FileOwner -Path $adminKeysFile -OwnerSid $script:AdministratorsSid
+try {
+    Set-FileOwner -Path $adminKeysFile -OwnerSid $script:AdministratorsSid
+} catch {
+    # The access control list is what OpenSSH checks, the owner is a nicety.
+    Write-WarnMessage "Could not set the owner of $adminKeysFile ($($_.Exception.Message))."
+}
 Write-Ok "Authorized key written to $adminKeysFile"
 
 $sshUserProfile = Get-UserProfilePath -Name $SshUser
@@ -638,7 +745,11 @@ if (Test-Path -LiteralPath $sshUserProfile) {
     Set-Content -LiteralPath $userKeysFile -Value $userKeys -Encoding ASCII
     Set-RestrictedAcl -Path $userSshDir -AllowedSids @($script:SystemSid, $script:AdministratorsSid, $sshUserSid)
     Set-RestrictedAcl -Path $userKeysFile -AllowedSids @($script:SystemSid, $script:AdministratorsSid, $sshUserSid)
-    Set-FileOwner -Path $userKeysFile -OwnerSid $sshUserSid
+    try {
+        Set-FileOwner -Path $userKeysFile -OwnerSid $sshUserSid
+    } catch {
+        Write-WarnMessage "Could not set the owner of $userKeysFile ($($_.Exception.Message))."
+    }
     Write-Ok "Authorized key written to $userKeysFile"
 } else {
     Write-WarnMessage "Profile directory '$sshUserProfile' does not exist yet; only the ProgramData key file was written."
@@ -661,38 +772,29 @@ if (Test-Path -LiteralPath $sshdConfig) {
 $blockPattern = "(?ms)^$([regex]::Escape($script:SshdConfigMarkerBegin)).*?$([regex]::Escape($script:SshdConfigMarkerEnd))\r?\n?"
 $existingConfig = [regex]::Replace($existingConfig, $blockPattern, '')
 
-# KbdInteractiveAuthentication only exists in OpenSSH 8.7+. Older Windows
-# builds ship OpenSSH 8.6 and reject the newer keyword.
-$sshdVersion = '0.0'
-try {
-    $sshdVersion = (Get-Item -LiteralPath $sshdExe).VersionInfo.ProductVersion
-} catch {
-    Write-Verbose 'Could not read the sshd version, keeping the conservative default.'
-}
-$kbdSetting = 'KbdInteractiveAuthentication no'
-if ($sshdVersion -match '^(\d+)\.(\d+)') {
-    $major = [int] $Matches[1]
-    $minor = [int] $Matches[2]
-    if ($major -lt 8 -or ($major -eq 8 -and $minor -lt 7)) {
-        $kbdSetting = 'ChallengeResponseAuthentication no'
-    }
-}
+# KbdInteractiveAuthentication only exists in OpenSSH 8.7+. Windows 10 ships
+# OpenSSH 8.6 and rejects the newer keyword, so the keyword is probed instead
+# of being guessed from the file version.
+$kbdCandidates = @('KbdInteractiveAuthentication no', 'ChallengeResponseAuthentication no')
+$kbdSetting = ''
+$sshdTest = $null
 
-$hardeningBlock = @"
+function Write-SshdConfig {
+    param([string] $KeyboardInteractiveSetting)
+    $block = @"
 $($script:SshdConfigMarkerBegin)
 # Managed by workstations/windows/setup.ps1 - edit that script, not this file.
 PasswordAuthentication no
-$kbdSetting
+$KeyboardInteractiveSetting
 PermitRootLogin no
 PubkeyAuthentication yes
 AllowUsers $SshUser
 $($script:SshdConfigMarkerEnd)
 "@
-
-# OpenSSH uses the first value it reads for a keyword, so the hardening block
-# has to be at the very top of the file, before any Match block.
-$newConfig = $hardeningBlock + "`r`n" + $existingConfig
-Set-Content -LiteralPath $sshdConfig -Value $newConfig -Encoding ASCII -NoNewline
+    # OpenSSH uses the first value it reads for a keyword, so the hardening
+    # block has to be at the very top of the file, before any Match block.
+    Set-Content -LiteralPath $sshdConfig -Value ($block + "`r`n" + $existingConfig) -Encoding ASCII -NoNewline
+}
 
 function Restore-SshdConfig {
     if (Test-Path -LiteralPath $sshdConfigOriginal) {
@@ -702,8 +804,21 @@ function Restore-SshdConfig {
     }
 }
 
-$sshdTest = Invoke-Native -FilePath $sshdExe -ArgumentList @('-t')
-if ($sshdTest.ExitCode -ne 0) {
+foreach ($candidate in $kbdCandidates) {
+    Write-SshdConfig -KeyboardInteractiveSetting $candidate
+    $sshdTest = Invoke-Native -FilePath $sshdExe -ArgumentList @('-t')
+    if ($sshdTest.ExitCode -eq 0) {
+        $kbdSetting = $candidate
+        break
+    }
+    # Only try the other keyword when this one is what sshd rejected.
+    if (($sshdTest.Output -join ' ') -notmatch '(?i)kbdinteractiveauthentication') {
+        break
+    }
+    Write-Info "sshd does not support '$candidate', trying the alternative keyword."
+}
+
+if (-not $kbdSetting) {
     Restore-SshdConfig
     Stop-WithError "sshd -t failed, the previous configuration was restored: $($sshdTest.Output -join ' ')"
 }
