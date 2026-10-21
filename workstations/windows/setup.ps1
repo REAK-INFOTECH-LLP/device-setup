@@ -68,6 +68,9 @@
     $env:ENROLL_SECRET = 'YOUR_FLEET_ENROLL_SECRET'
     .\setup.ps1
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingConvertToSecureStringWithPlainText', '',
+    Justification = 'The account password is a throwaway random value that is generated here, never displayed and never stored. New-LocalUser needs a SecureString.')]
 [CmdletBinding()]
 param(
     [string] $Username = '',

@@ -126,6 +126,19 @@ The Fleet CLI requires the secret as a command-line argument while generating th
 - The Fleet MSI is generated locally only when Docker or a local WiX v3 toolset is available. Building an MSI otherwise needs a build host, so `FLEET_PACKAGE_PATH` is the usual route for a fleet rollout.
 - The Fleet agent on Windows registers as `Fleet osquery` rather than an `orbit` systemd unit.
 
+## Checks
+
+The scripts are checked in a container that carries PowerShell and PSScriptAnalyzer.
+
+```sh
+docker build -f workstations/windows/tests/Dockerfile -t reak-windows-checks .
+docker run --rm reak-windows-checks
+```
+
+The run covers the PowerShell parser, PSScriptAnalyzer, the Windows PowerShell 5.1 compatibility rules, unit tests for the platform independent helpers, and seven mocked scenarios of `setup.ps1` and `rollback.ps1`: the baseline run, the Fleet enrollment, a pre-generated package, a host that is already enrolled, a rejected `sshd -t`, a rejected hardening check, and the rollback. The mocked scenarios use the Windows cmdlets as stubs, so the container checks the control flow and the failure handling, not the Windows APIs.
+
+A Windows container cannot be used for this: the Windows images need a Windows host kernel, so `docker run mcr.microsoft.com/windows/servercore` fails with `no matching manifest for linux/amd64`. Running the bootstrap on real Windows hardware is still required before it is used in production.
+
 ## Rollback
 
 `rollback.ps1` reverts what the bootstrap did.
@@ -145,7 +158,7 @@ It restores the SSH configuration, removes the given public key from the authori
 
 ## Known limitations / follow-up
 
-- The script has been validated with PowerShell parser checks, PSScriptAnalyzer and a mocked end-to-end run. It has not yet been run on physical Windows hardware, so the first run should be on a clean virtual machine.
+- The script has been validated with the container checks described above, which cover parsing, static analysis, PowerShell 5.1 compatibility, unit tests and mocked end-to-end runs. It has not yet been run on physical Windows hardware, so the first run should be on a clean virtual machine.
 - Vendor installers (Chrome, VS Code, Bruno, Firefox, NVM, Docker Desktop) are downloaded from their vendor URLs and are not cryptographically pinned. The Go archive and the Fleet CLI archive are checksum-verified. Use approved internal mirrors or vendor signature verification for high-threat deployments.
 - The Chrome installer is run with `/system-level`. Confirm the install landed in `C:\Program Files` on the target image, because a per-user install would not be visible to the `reak` account.
 - VS Code is installed here. The Linux bootstrap has an open item to replace it with Zed, and the same decision should be applied here.

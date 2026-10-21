@@ -274,10 +274,10 @@ Write-Host '=== 4/4 Workstation account ===' -ForegroundColor White
 if ($RemoveUser) {
     $account = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
     if ($account) {
-        $profile = Get-UserProfilePath -Name $Username
+        $userProfile = Get-UserProfilePath -Name $Username
         Remove-LocalUser -Name $Username -ErrorAction SilentlyContinue
-        if (Test-Path -LiteralPath $profile) {
-            Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $userProfile) {
+            Remove-Item -LiteralPath $userProfile -Recurse -Force -ErrorAction SilentlyContinue
         }
         Write-Ok "Removed the account '$Username'."
     } else {
