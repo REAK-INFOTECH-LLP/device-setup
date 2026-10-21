@@ -860,41 +860,16 @@ if (-not (Get-Service -Name 'sshd' -ErrorAction SilentlyContinue)) {
 }
 Set-Service -Name 'sshd' -StartupType Automatic -ErrorAction SilentlyContinue
 
-# Restart or start the sshd service with retries and diagnostic reporting.
-$serviceStarted = $false
-$maxServiceAttempts = 3
-for ($attempt = 1; $attempt -le $maxServiceAttempts; $attempt++) {
-    try {
-        Restart-Service -Name 'sshd' -Force -ErrorAction Stop
-        $serviceStarted = $true
-        break
-    } catch {
-        Write-Info "Restart-Service attempt $attempt failed ($($_.Exception.Message)). Retrying with Start-Service..."
-        Start-Sleep -Seconds 2
-        try {
-            Start-Service -Name 'sshd' -ErrorAction Stop
-            $serviceStarted = $true
-            break
-        } catch {
-            if ($attempt -lt $maxServiceAttempts) {
-                # Attempt to repair file permissions on ProgramData\ssh before next try
-                Set-RestrictedAcl -Path $sshDir -AllowedSids @($script:SystemSid, $script:AdministratorsSid)
-                Get-ChildItem -LiteralPath $sshDir -File -ErrorAction SilentlyContinue | ForEach-Object {
-                    Set-RestrictedAcl -Path $_.FullName -AllowedSids @($script:SystemSid, $script:AdministratorsSid)
-                }
-                Start-Sleep -Seconds 3
-            }
-        }
-    }
-}
-
-if (-not $serviceStarted) {
-    # Run sshd in debug mode to extract the exact reason why Windows refused to start it.
+# Try to start the sshd service once. If it fails, log a warning and continue immediately
+# without hanging or retrying, so desktop apps and developer tools install smoothly.
+try {
+    Start-Service -Name 'sshd' -ErrorAction Stop
+    Write-Ok 'OpenSSH server started and set to start automatically.'
+} catch {
+    # Run sshd in debug mode to extract diagnostic info for logs without crashing the script.
     $diag = Invoke-Native -FilePath $sshdExe -ArgumentList @('-d')
     $diagOutput = ($diag.Output -join ' ')
-    Write-WarnMessage "Could not start OpenSSH service (sshd). Moving to next step. Diagnostic: $diagOutput"
-} else {
-    Write-Ok 'OpenSSH server started and set to start automatically.'
+    Write-WarnMessage "OpenSSH service could not start ($($_.Exception.Message)). Skipping to next step. Diagnostic: $diagOutput"
 }
 
 try {
