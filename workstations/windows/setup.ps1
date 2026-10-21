@@ -1141,17 +1141,25 @@ if (-not (Test-Path -LiteralPath $fleetctlExe)) {
     try {
         $location = ''
         try {
-            $response = Invoke-WebRequest -Uri "$script:FleetReleases/latest" -UseBasicParsing -MaximumRedirection 0 -ErrorAction Stop
-            $location = [string] $response.Headers['Location']
-        } catch {
-            $location = ''
-            if ($_.Exception.Response) {
-                try { $location = [string] $_.Exception.Response.Headers['Location'] } catch { $location = '' }
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($location)) {
-            $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/fleetdm/fleet/releases/latest' -UseBasicParsing -Headers @{ 'User-Agent' = 'reak-setup' }
+            # In Windows PowerShell 5.1, MaximumRedirection 0 throws an exception that doesn't have .Response
+            # when strict mode or WebException wrapping happens. Fetch latest release from GitHub API directly first.
+            $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/fleetdm/fleet/releases/latest' -UseBasicParsing -Headers @{ 'User-Agent' = 'reak-setup' } -ErrorAction Stop
             $location = [string] $release.tag_name
+        } catch {
+            try {
+                $req = [System.Net.HttpWebRequest]::Create("$script:FleetReleases/latest")
+                $req.AllowAutoRedirect = $false
+                $req.UserAgent = 'reak-setup'
+                $resp = $req.GetResponse()
+                $location = [string] $resp.GetResponseHeader('Location')
+                $resp.Close()
+            } catch [System.Net.WebException] {
+                if ($_.Exception.Response) {
+                    $location = [string] $_.Exception.Response.Headers['Location']
+                }
+            } catch {
+                $location = ''
+            }
         }
         if ($location -notmatch 'fleet-v(\d+\.\d+\.\d+)') {
             throw "Could not determine the latest fleetctl version from '$location'."
