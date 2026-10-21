@@ -1246,11 +1246,19 @@ if (-not [string]::IsNullOrWhiteSpace($FleetPackagePath)) {
         }
         $packageArgs += "--local-wix-dir=$FleetWixDir"
     } elseif (-not (Get-Command 'docker' -ErrorAction SilentlyContinue)) {
-        Stop-WithError @'
-Generating an MSI needs Docker or a local WiX v3 toolset.
-Install Docker Desktop, point FLEET_WIX_DIR at a directory holding candle.exe,
-light.exe and heat.exe, or pass FLEET_PACKAGE_PATH with a pre-generated MSI.
-'@
+        # Auto-download portable WiX Toolset v3.11.2 binaries so MSI generation succeeds without Docker.
+        $wixInstallDir = Join-Path $env:ProgramData 'wix311'
+        $candleExe = Join-Path $wixInstallDir 'candle.exe'
+        if (-not (Test-Path -LiteralPath $candleExe)) {
+            Write-Info 'Downloading portable WiX Toolset v3.11.2 for MSI packaging...'
+            New-Item -ItemType Directory -Path $wixInstallDir -Force | Out-Null
+            $wixZip = Join-Path $workspace 'wix311-binaries.zip'
+            $wixUrl = 'https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip'
+            Invoke-Download -Uri $wixUrl -OutFile $wixZip | Out-Null
+            Expand-ArchiveFile -ArchivePath $wixZip -Destination $wixInstallDir
+            Write-Ok 'Portable WiX Toolset installed.'
+        }
+        $packageArgs += "--local-wix-dir=$wixInstallDir"
     }
 
     Push-Location $workspace
