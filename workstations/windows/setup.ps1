@@ -892,9 +892,10 @@ if (-not $serviceStarted) {
     # Run sshd in debug mode to extract the exact reason why Windows refused to start it.
     $diag = Invoke-Native -FilePath $sshdExe -ArgumentList @('-d')
     $diagOutput = ($diag.Output -join ' ')
-    Stop-WithError "Failed to start OpenSSH SSH Server (sshd). Diagnostic output: $diagOutput"
+    Write-WarnMessage "Could not start OpenSSH service (sshd). Moving to next step. Diagnostic: $diagOutput"
+} else {
+    Write-Ok 'OpenSSH server started and set to start automatically.'
 }
-Write-Ok 'OpenSSH server started and set to start automatically.'
 
 try {
     if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) {
