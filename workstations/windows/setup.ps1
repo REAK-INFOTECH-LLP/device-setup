@@ -70,7 +70,7 @@
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingConvertToSecureStringWithPlainText', '',
-    Justification = 'The account password is a throwaway random value that is generated here, never displayed and never stored. New-LocalUser needs a SecureString.')]
+    Justification = 'The initial password is the workstation username, which is not a secret. New-LocalUser and Set-LocalUser need a SecureString.')]
 [CmdletBinding()]
 param(
     [string] $Username = '',
@@ -634,22 +634,19 @@ Write-Info "Workspace: $workspace"
 
 Write-Step '2/6 Workstation account'
 
+$securePassword = ConvertTo-SecureString $Username -AsPlainText -Force
 $workstationUser = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
 if (-not $workstationUser) {
-    Write-Info "Creating local account '$Username' with a random password that must be changed at first logon."
-    $password = New-RandomPassword
-    $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+    Write-Info "Creating local account '$Username'."
     New-LocalUser -Name $Username -Password $securePassword -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword:$false -Description 'REAK workstation account' | Out-Null
-    # Mark the password as expired so Windows asks for a new one at first logon.
-    try {
-        Set-PasswordExpired -Name $Username
-        Write-Ok "Account '$Username' created. The password must be changed at first logon."
-    } catch {
-        Write-WarnMessage "Could not force a password change for '$Username' ($($_.Exception.Message)). The random password is unknown, so the account stays locked until an administrator sets one with: net user $Username <password>"
-    }
+    Write-Ok "Account '$Username' created."
 } else {
     Write-Ok "Account '$Username' already exists."
 }
+
+Write-Info "Setting password for '$Username'."
+Set-LocalUser -Name $Username -Password $securePassword
+Write-Ok "The password for '$Username' matches the username."
 
 $administratorsGroup = Get-LocalGroupBySid -Sid $script:AdministratorsSid
 $administratorMembers = @(Get-LocalGroupMember -Group $administratorsGroup -ErrorAction SilentlyContinue |

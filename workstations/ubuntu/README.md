@@ -5,7 +5,7 @@ REAK Linux workstations are managed in Fleet. The bootstrap script installs the 
 ## Requirements
 
 - A supported Ubuntu desktop install with internet access. The OS installation creates the `administrator` account with `sudo` access.
-- A REAK-approved SSH public key value. The script does not include a personal key or set a shared default password.
+- A REAK-approved SSH public key value. The script does not include a personal key.
 - Network access to `https://fleet.reak.in` and Fleet download endpoints. The script installs `fleetctl` when needed.
 - Fleet enrollment secret from an authorized Fleet administrator. Do not put it in this repository or shell history. If Orbit is already active, enrollment is skipped.
 
@@ -17,7 +17,7 @@ Review `setup.sh`, then run it from a local checkout. The script performs the ba
 sudo ./workstations/ubuntu/setup.sh
 ```
 
-The script creates the `reak` account without a preset password, installs baseline packages, configures SSH public-key access for the `administrator` account, and installs Docker, Chrome, Bruno, VS Code, Go, and opkssh. It also configures Firefox's uBlock Origin policy, disables VS Code telemetry, and installs NVM for `reak`. Docker group access and Copilot are opt-in because they have additional security/privacy implications. Downloaded temporary files use private directories, and the Go archive is checksum-verified.
+The script creates the `reak` account with its username as the password (rerunning resets it), installs baseline packages, configures SSH public-key access for the `administrator` account, and installs Docker, Chrome, Bruno, VS Code, Go, and opkssh. It also configures Firefox's uBlock Origin policy, disables VS Code telemetry, and installs NVM for `reak`. Docker group access and Copilot are opt-in because they have additional security/privacy implications. Downloaded temporary files use private directories, and the Go archive is checksum-verified.
 
 Provide the SSH public key via `SSH_PUB_KEY` in the environment when running the script. Because `sudo` may remove environment variables, pass it explicitly, for example:
 

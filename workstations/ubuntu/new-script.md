@@ -92,7 +92,7 @@ Do not store `ENROLL_SECRET` in shell history or the repository.
 
 ## Phase 2 — `reak` user
 
-- Creates the `reak` account without a preset password and locks it, if missing.
+- Creates the `reak` account if missing and sets its password to the username.
 
 ## Phase 3 — Baseline packages
 

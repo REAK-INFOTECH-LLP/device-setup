@@ -30,10 +30,12 @@ assert_not_symlink() {
 }
 
 if ! id "$USERNAME" >/dev/null 2>&1; then
-  log "Creating account '$USERNAME' without a preset password."
+  log "Creating account '$USERNAME'."
   useradd --create-home --shell /bin/bash "$USERNAME"
-  passwd --lock "$USERNAME"
 fi
+
+log "Setting password for '$USERNAME'."
+printf '%s:%s\n' "$USERNAME" "$USERNAME" | chpasswd
 
 log "Installing baseline packages."
 apt-get update

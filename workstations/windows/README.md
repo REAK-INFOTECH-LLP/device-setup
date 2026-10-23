@@ -7,7 +7,7 @@ REAK Windows workstations are managed in Fleet. The bootstrap script installs th
 - A Windows 10 or Windows 11 desktop (x64) with internet access. The script is tested against Windows 11; it uses PowerShell 5.1 features only, so it runs on the built-in Windows PowerShell.
 - An elevated PowerShell session. Run it from a terminal that was started with **Run as Administrator**.
 - A local `administrator` account. It must exist before the script runs, because it is the account allowed to log in over SSH.
-- A REAK-approved SSH public key value. The script does not include a personal key or set a shared default password.
+- A REAK-approved SSH public key value. The script does not include a personal key.
 - Network access to `https://fleet.reak.in`, the Fleet download endpoints, and the vendor download endpoints for Chrome, VS Code, Bruno, Firefox, Go and NVM.
 - Fleet enrollment secret from an authorized Fleet administrator. Do not put it in this repository or shell history. If Orbit is already active, enrollment is skipped.
 
@@ -21,7 +21,7 @@ $env:ENROLL_SECRET = 'YOUR_FLEET_ENROLL_SECRET'
 .\workstations\windows\setup.ps1
 ```
 
-The script creates the `reak` account with a random password that must be changed at first logon, installs the OpenSSH server and hardens it for key-only access by `administrator`, and installs Chrome, VS Code, Bruno, Firefox, Go and opkssh. It also configures Firefox's uBlock Origin policy, disables VS Code telemetry, and enrolls the host in Fleet.
+The script creates the `reak` account with its username as the initial password, installs the OpenSSH server and hardens it for key-only access by `administrator`, and installs Chrome, VS Code, Bruno, Firefox, Go and opkssh. It also configures Firefox's uBlock Origin policy, disables VS Code telemetry, and enrolls the host in Fleet.
 
 Downloaded temporary files use a private directory, and the Go archive is checksum-verified.
 
@@ -77,7 +77,7 @@ Settings are read from environment variables. A command-line parameter always wi
 
 ### 2. Workstation account
 
-- Creates the `reak` account with a 32 character random password, no expiry, and a flag that forces a password change at first logon. The password is never printed.
+- Creates the `reak` account if missing and sets its password to the username, so the account can log in. Rerunning the script resets the password to the username.
 - Adds the account to the local Administrators group.
 
 ### 3. OpenSSH hardening
