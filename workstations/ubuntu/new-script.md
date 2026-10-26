@@ -12,87 +12,65 @@ This file explains `workstations/ubuntu/setup.sh`. The script must run as root
 
 - Ubuntu (amd64) desktop with internet access.
 - The `administrator` account must already exist (created during OS install).
-- Run from a local checkout:
+- The workstation account is hardcoded as `reak`; the SSH account is hardcoded
+  as `administrator`.
+- On a fresh machine, download the script with `wget` and run it. It prompts for
+  the SSH public key and Fleet enrollment secret when they are not already set:
 
 ```sh
-sudo ./workstations/ubuntu/setup.sh
+wget -qO /tmp/reak-setup.sh https://it.reak.co.in/workstations/ubuntu/setup.sh
+sudo bash /tmp/reak-setup.sh
 ```
 
-## Variables to set
+From a local checkout, run `sudo bash workstations/ubuntu/setup.sh`.
 
-| Variable | Required? | Default | Purpose |
-| --- | --- | --- | --- |
-| `SSH_PUB_KEY` | Yes | — | Approved administrator SSH public key. Validated with `ssh-keygen` before SSH is changed. |
-| `ENROLL_SECRET` | For Fleet enrollment | — | Fleet enrollment secret. The script prompts for it on a terminal; non-interactive runs must provide it in the privileged environment. |
-| `SKIP_FLEET` | No | `0` | Set to `1` to run baseline setup only and skip Fleet enrollment. |
-| `REAK_USERNAME` | No | `reak` | Workstation user account to create/use. |
-| `REAK_SSH_USER` | No | `administrator` | Account allowed to SSH. |
-| `DOCKER_GROUP_ACCESS` | No | `0` | Set to `1` to add the user to Docker's root-equivalent group. |
-| `FLEET_ENABLE_SCRIPTS` | No | `1` | Set to `0` to disable Fleet script execution on hosts. |
-| `INSTALL_COPILOT` | No | `0` | Set to `1` to install GitHub Copilot; it is not installed by default. |
-
-Examples:
+`sudo -E` is not used because the sudoers `env_reset` policy commonly strips
+the variables. When values must be supplied without prompts, set them inside a
+root shell and run the script there:
 
 ```sh
-sudo env SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)" ./workstations/ubuntu/setup.sh
-```
-
-All exports in one block (copy-paste, then edit values):
-
-```sh
-export REAK_USERNAME="reak"
-export REAK_SSH_USER="administrator"
+wget -qO /tmp/reak-setup.sh https://it.reak.co.in/workstations/ubuntu/setup.sh
+sudo -i
 export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
-export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
-export SKIP_FLEET="0"
-export DOCKER_GROUP_ACCESS="0"
-export FLEET_ENABLE_SCRIPTS="0"
-export INSTALL_COPILOT="0"
+read -rsp "Fleet enrollment secret: " ENROLL_SECRET; printf '\n'; export ENROLL_SECRET
+bash /tmp/reak-setup.sh
 ```
 
-Baseline only (skip Fleet):
+The only runtime values are the SSH public key and Fleet enrollment secret. The
+script has no user, skip, or feature flags. `SSH_PUB_KEY_FILE` and
+`ENROLL_SECRET_FILE` are optional file-based ways to provide those values.
 
-```sh
-sudo env SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)" SKIP_FLEET=1 ./workstations/ubuntu/setup.sh
-```
+## Values to set
 
-## Full run from GitHub raw URL (with export)
+| Variable | Required? | Purpose |
+| --- | --- | --- |
+| `SSH_PUB_KEY` | No (prompted) | Approved administrator SSH public key. Validated with `ssh-keygen` before SSH is changed. |
+| `SSH_PUB_KEY_FILE` | No | Read the administrator public key from a file instead of `SSH_PUB_KEY`/prompt. |
+| `ENROLL_SECRET` | Yes (prompted) | Fleet enrollment secret. Prompted with hidden input when unset. |
+| `ENROLL_SECRET_FILE` | No | Read the Fleet enrollment secret from a file instead of `ENROLL_SECRET`/prompt. |
+
+For non-interactive setup, provide both values in the root shell:
 
 ```sh
 export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
-export ENROLL_SECRET="YOUR_FLEET_ENROLL_SECRET"
-# Optional:
-# export SKIP_FLEET=1
-# export REAK_USERNAME=reak
-# export REAK_SSH_USER=administrator
-
-curl -fsSL https://it.reak.co.in/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
-chmod +x /tmp/reak-setup.sh
-sudo -E /tmp/reak-setup.sh
+read -rsp "Fleet enrollment secret: " ENROLL_SECRET; printf '\n'; export ENROLL_SECRET
 ```
 
-Baseline only from raw URL (no Fleet secret needed):
-
-```sh
-export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
-export SKIP_FLEET=1
-
-curl -fsSL https://it.reak.co.in/workstations/ubuntu/setup.sh -o /tmp/reak-setup.sh
-chmod +x /tmp/reak-setup.sh
-sudo -E /tmp/reak-setup.sh
-```
-
-Do not store `ENROLL_SECRET` in shell history or the repository.
+Do not store `ENROLL_SECRET` in shell history or the repository. Use `read -rsp`
+as shown above, or `ENROLL_SECRET_FILE`, when the secret must not appear in
+history or the process list.
 
 ## Phase 1 — Safety checks
 
 - Requires root, `apt-get` (Debian/Ubuntu), and `amd64` architecture.
-- Requires the `administrator` account to exist.
-- Requires `SSH_PUB_KEY` to be set.
+- Requires the hardcoded SSH account (`administrator`) to exist.
+- Requires `SSH_PUB_KEY`, `SSH_PUB_KEY_FILE`, or an interactive terminal for the
+  key prompt.
 
 ## Phase 2 — `reak` user
 
 - Creates the `reak` account if missing and sets its password to the username.
+  The account is left unlocked, so it can log in with that password.
 
 ## Phase 3 — Baseline packages
 
@@ -103,8 +81,8 @@ Do not store `ENROLL_SECRET` in shell history or the repository.
 
 - Validates `SSH_PUB_KEY` with `ssh-keygen` before touching SSH config, so an
   invalid key stops the script early.
-- Writes the key to the administrator's `~/.ssh/authorized_keys` with `700/600`
-  permissions.
+- Writes the key to `administrator`'s `~/.ssh/authorized_keys` with
+  `700/600` permissions.
 - Writes `/etc/ssh/sshd_config.d/00-reak.conf` so the settings take priority
   over common cloud-init drop-ins and do not depend on where the main config
   file ends:
@@ -122,13 +100,13 @@ Result: only `administrator` can SSH, using a key; password/root login is off.
 ## Phase 5 — Docker
 
 - Installs Docker via the official script if missing.
-- Installs Docker. `DOCKER_GROUP_ACCESS=1` is required to add `reak` to the
-  Docker group because Docker group membership is equivalent to root.
+- Adds `reak` to the Docker group. Docker group membership is equivalent to
+  root, so this access is part of the default setup.
 
 ## Phase 6 — Apps and tooling
 
 - Installs Chrome, Bruno (pinned), and VS Code if missing.
-- Disables VS Code telemetry. Copilot installation is opt-in with `INSTALL_COPILOT=1`.
+- Disables VS Code telemetry and installs the GitHub Copilot extension.
 - Applies a Firefox policy that force-installs uBlock Origin.
 - Installs NVM for `reak`.
 - Installs the latest Go release and adds it to PATH files.
@@ -146,22 +124,20 @@ signature verification.
 
 ## Phase 7 — Fleet enrollment
 
-After baseline, if `SKIP_FLEET=1` the script exits successfully here.
-
-Otherwise it runs these 7 steps:
+After baseline, it runs these 7 steps:
 
 1. **OS check** — confirms Ubuntu/Debian on `amd64`.
 2. **Fleet CLI** — installs `fleetctl` with the official installer if missing.
 3. **Already enrolled?** — if the `orbit` service is already active, it leaves
    it unchanged and exits.
 4. **Workspace** — prepares a temporary directory for package generation.
-5. **Secret** — uses `ENROLL_SECRET`, prompting on a terminal when needed.
-   The interactive prompt is preferred. The Fleet CLI requires the secret as a
-   command argument while generating the package, so it may briefly be visible
-   to local process inspection.
+5. **Secret** — uses `ENROLL_SECRET`, `ENROLL_SECRET_FILE`, or a hidden
+   interactive prompt. The prompt reads from the controlling terminal, so it
+   works even when the script itself was started from a pipe. The Fleet CLI
+   requires the secret as a command argument while generating the package, so
+   it may briefly be visible to local process inspection.
 6. **Package** — generates the agent with `fleetctl package --type=deb`,
-   `--fleet-desktop`, and `--enable-scripts` (set `FLEET_ENABLE_SCRIPTS=0`
-   to skip it).
+   `--fleet-desktop`, and `--enable-scripts`.
 7. **Install** — installs the `.deb`, then deletes the temporary package file.
    The workspace is mode `0700` and is removed by an exit trap, including on
    failure.

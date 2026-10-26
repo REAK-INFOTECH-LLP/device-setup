@@ -10,8 +10,8 @@ set -euo pipefail
 #   REMOVE_USER=1  delete the workstation user account and its home.
 #   REMOVE_APPS=1  best-effort removal of apps/tools installed by setup.sh.
 
-USERNAME="${REAK_USERNAME:-reak}"
-SSH_USER="${REAK_SSH_USER:-administrator}"
+USERNAME="reak"
+SSH_USER="administrator"
 SSH_PUB_KEY="${SSH_PUB_KEY:-}"
 REMOVE_USER="${REMOVE_USER:-0}"
 REMOVE_APPS="${REMOVE_APPS:-0}"

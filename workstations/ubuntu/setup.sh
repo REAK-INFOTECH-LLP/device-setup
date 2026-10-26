@@ -1,28 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ubuntu workstation baseline for REAK. Run with sudo after reviewing the
-# organization-specific SSH key and account assumptions in README.md.
+# Ubuntu workstation baseline for REAK. Run with sudo.
+# The workstation account and SSH account are fixed; only the SSH public key
+# and Fleet enrollment secret are supplied at runtime.
 
-USERNAME="${REAK_USERNAME:-reak}"
-SSH_USER="${REAK_SSH_USER:-administrator}"
+USERNAME="reak"
+SSH_USER="administrator"
 SSH_PUB_KEY="${SSH_PUB_KEY:-}"
-SKIP_FLEET="${SKIP_FLEET:-0}"
-DOCKER_GROUP_ACCESS="${DOCKER_GROUP_ACCESS:-0}"
-FLEET_ENABLE_SCRIPTS="${FLEET_ENABLE_SCRIPTS:-1}"
-INSTALL_COPILOT="${INSTALL_COPILOT:-0}"
+SSH_PUB_KEY_FILE="${SSH_PUB_KEY_FILE:-}"
 
 log() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
+
+prompt_value() {
+  local prompt="$1" value
+  { exec 3<>/dev/tty; } 2>/dev/null || return 1
+  printf '%s' "$prompt" >&3
+  IFS= read -r value <&3 || { exec 3<&-; return 1; }
+  exec 3<&-
+  printf '%s' "$value"
+}
+
+prompt_secret() {
+  local prompt="$1" value
+  { exec 3<>/dev/tty; } 2>/dev/null || return 1
+  printf '%s' "$prompt" >&3
+  IFS= read -rs value <&3 || { printf '\n' >&3; exec 3<&-; return 1; }
+  printf '\n' >&3
+  exec 3<&-
+  printf '%s' "$value"
+}
 
 [[ "${EUID}" -eq 0 ]] || die "Run this script with sudo/root."
 command -v apt-get >/dev/null || die "This script supports Debian-based Ubuntu systems only."
 ARCH="$(dpkg --print-architecture)"
 [[ "$ARCH" == "amd64" ]] || die "This script supports amd64 only; found $ARCH."
-[[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "Invalid REAK_USERNAME."
-[[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "Invalid REAK_SSH_USER."
-id "$SSH_USER" >/dev/null 2>&1 || die "Required SSH account '$SSH_USER' does not exist."
-[[ -n "$SSH_PUB_KEY" ]] || die "Set SSH_PUB_KEY to the approved administrator public key."
+id "$SSH_USER" >/dev/null 2>&1 || die "Required SSH account '$SSH_USER' does not exist. Create it during OS installation."
+
+if [[ -z "$SSH_PUB_KEY" && -n "$SSH_PUB_KEY_FILE" ]]; then
+  [[ -r "$SSH_PUB_KEY_FILE" ]] || die "Cannot read SSH_PUB_KEY_FILE: $SSH_PUB_KEY_FILE"
+  SSH_PUB_KEY="$(<"$SSH_PUB_KEY_FILE")"
+fi
+if [[ -z "$SSH_PUB_KEY" ]]; then
+  log "SSH_PUB_KEY is not set; prompting for the administrator public key."
+  SSH_PUB_KEY="$(prompt_value "Approved administrator SSH public key: ")" || \
+    die "No terminal available. Set SSH_PUB_KEY or SSH_PUB_KEY_FILE, or run from a terminal."
+fi
+SSH_PUB_KEY="${SSH_PUB_KEY//$'\r'/}"
+SSH_PUB_KEY="${SSH_PUB_KEY%%$'\n'*}"
+[[ -n "$SSH_PUB_KEY" ]] || die "SSH_PUB_KEY cannot be empty."
 
 assert_not_symlink() {
   local path="$1"
@@ -31,7 +59,11 @@ assert_not_symlink() {
 
 if ! id "$USERNAME" >/dev/null 2>&1; then
   log "Creating account '$USERNAME'."
-  useradd --create-home --shell /bin/bash "$USERNAME"
+  if getent group "$USERNAME" >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash --gid "$USERNAME" "$USERNAME"
+  else
+    useradd --create-home --shell /bin/bash "$USERNAME"
+  fi
 fi
 
 log "Setting password for '$USERNAME'."
@@ -133,14 +165,11 @@ systemctl reload ssh
 
 if ! command -v docker >/dev/null 2>&1; then
   log "Installing Docker using Docker's installation script."
-  curl -fsSL https://get.docker.com | sh
+  wget -qO- https://get.docker.com | sh
 fi
-if [[ "$DOCKER_GROUP_ACCESS" == "1" ]]; then
-  log "Granting '$USERNAME' access to the root-equivalent docker group."
-  usermod -aG docker "$USERNAME"
-else
-  log "Leaving '$USERNAME' out of the root-equivalent docker group."
-fi
+getent group docker >/dev/null 2>&1 || groupadd --system docker
+log "Granting '$USERNAME' access to the root-equivalent docker group."
+usermod -aG docker "$USERNAME"
 
 install_deb() {
   local url="$1" package_name="$2" download_dir path
@@ -171,14 +200,17 @@ config_dir="/home/$USERNAME/.config/Code/User"
 assert_not_symlink "/home/$USERNAME/.config"
 assert_not_symlink "/home/$USERNAME/.config/Code"
 assert_not_symlink "$config_dir"
-install -d -o "$USERNAME" -g "$USERNAME" "$config_dir"
+install -d -o "$USERNAME" -g "$USERNAME" \
+  "/home/$USERNAME/.config" \
+  "/home/$USERNAME/.config/Code" \
+  "$config_dir"
 assert_not_symlink "$config_dir/settings.json"
 cat > "$config_dir/settings.json" <<'EOF'
 {"telemetry.telemetryLevel":"off"}
 EOF
 chown "$USERNAME:$USERNAME" "$config_dir/settings.json"
-if [[ "$INSTALL_COPILOT" == "1" ]]; then
-  runuser -u "$USERNAME" -- code --install-extension GitHub.copilot --force || true
+if ! runuser -u "$USERNAME" -- code --install-extension GitHub.copilot --force; then
+  warn "GitHub Copilot extension installation failed; continuing."
 fi
 
 install -d -m 755 /etc/firefox/policies
@@ -224,7 +256,8 @@ done
 log 'NVM is wired into .bashrc, .profile and .zshrc. Open a new shell (or run: export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh") to use `nvm`.'
 
 if ! command -v go >/dev/null 2>&1; then
-  go_version="$(curl -fsSL https://go.dev/VERSION?m=text | head -n1)"
+  go_version="$(wget -qO- 'https://go.dev/VERSION?m=text')"
+  go_version="${go_version%%$'\n'*}"
   [[ "$go_version" =~ ^go[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || die "Could not determine a valid Go release."
   log "Installing $go_version."
   go_download_dir="$(mktemp -d /tmp/reak-go.XXXXXX)"
@@ -253,17 +286,12 @@ fi
 
 if [[ ! -x /usr/local/bin/opkssh ]]; then
   log "Installing opkssh."
-  curl -fL https://github.com/openpubkey/opkssh/releases/latest/download/opkssh-linux-amd64 \
-    -o /usr/local/bin/opkssh
+  wget -q https://github.com/openpubkey/opkssh/releases/latest/download/opkssh-linux-amd64 \
+    -O /usr/local/bin/opkssh
   chmod 755 /usr/local/bin/opkssh
 fi
 
 log "Baseline setup complete. Continuing with Fleet enrollment."
-
-if [[ "$SKIP_FLEET" == "1" ]]; then
-  log "Skipping Fleet enrollment (SKIP_FLEET=1)."
-  exit 0
-fi
 
 set -Eeuo pipefail
 umask 077
@@ -277,8 +305,9 @@ umask 077
 FLEET_URL="https://fleet.reak.in"
 FLEET_INSTALLER="https://fleetdm.com/resources/install-fleetctl.sh"
 
-# Prefer environment variable; fall back to interactive prompt only if needed
+# Prefer environment variable or secret file; fall back to an interactive prompt.
 ENROLL_SECRET="${ENROLL_SECRET:-}"
+ENROLL_SECRET_FILE="${ENROLL_SECRET_FILE:-}"
 
 # ---------- Colors ----------
 if [[ -t 1 ]]; then
@@ -353,7 +382,7 @@ export PATH="$HOME/.fleetctl:$PATH"
 
 if ! command -v fleetctl >/dev/null 2>&1; then
     log "Installing Fleet CLI using the official installer..."
-    curl -fsSL "$FLEET_INSTALLER" | bash
+    wget -qO- "$FLEET_INSTALLER" | bash
     export PATH="$HOME/.fleetctl:$PATH"
 fi
 
@@ -424,15 +453,16 @@ success "Workspace is ready."
 # ---------- 5. Enrollment secret ----------
 step "5/7 — Enrollment Secret"
 
-if [[ -z "$ENROLL_SECRET" ]]; then
-    if [[ -t 0 ]]; then
-        read -rsp "Fleet enrollment secret: " ENROLL_SECRET
-        printf '\n'
-    else
-        die "ENROLL_SECRET environment variable is required in non-interactive mode."
-    fi
+if [[ -z "$ENROLL_SECRET" && -n "$ENROLL_SECRET_FILE" ]]; then
+    [[ -r "$ENROLL_SECRET_FILE" ]] || die "Cannot read ENROLL_SECRET_FILE: $ENROLL_SECRET_FILE"
+    ENROLL_SECRET="$(<"$ENROLL_SECRET_FILE")"
 fi
-
+if [[ -z "$ENROLL_SECRET" ]]; then
+    ENROLL_SECRET="$(prompt_secret "Fleet enrollment secret: ")" || \
+        die "ENROLL_SECRET is required. Set ENROLL_SECRET or ENROLL_SECRET_FILE, or run from a terminal."
+fi
+ENROLL_SECRET="${ENROLL_SECRET//$'\r'/}"
+ENROLL_SECRET="${ENROLL_SECRET%%$'\n'*}"
 [[ -n "$ENROLL_SECRET" ]] || die "Enrollment secret cannot be empty."
 
 # ---------- 6. Generate package ----------
@@ -446,12 +476,10 @@ log "Generating package for $FLEET_URL"
 fleet_package_args=(
     --type=deb
     --fleet-desktop
+    --enable-scripts
     --fleet-url="$FLEET_URL"
     --enroll-secret="$ENROLL_SECRET"
 )
-if [[ "$FLEET_ENABLE_SCRIPTS" == "1" ]]; then
-    fleet_package_args+=(--enable-scripts)
-fi
 
 if ! (
     # fleetctl creates its package directories expecting the default umask
@@ -467,9 +495,14 @@ fi
 
 unset ENROLL_SECRET   # clear from environment as soon as possible
 
-PACKAGE_PATH=$(ls -1 fleet-osquery_*.deb 2>/dev/null | head -n1)
-[[ -n "$PACKAGE_PATH" && -s "$PACKAGE_PATH" ]] ||
-    die "Generated package not found."
+shopt -s nullglob
+fleet_debs=(fleet-osquery_*.deb)
+shopt -u nullglob
+if (( ${#fleet_debs[@]} != 1 )); then
+    die "Expected one generated fleet-osquery package, found ${#fleet_debs[@]}."
+fi
+PACKAGE_PATH="${fleet_debs[0]}"
+[[ -s "$PACKAGE_PATH" ]] || die "Generated package is empty."
 
 PACKAGE_PATH="$WORK_ROOT/$PACKAGE_PATH"
 success "Package generated: $PACKAGE_PATH"
@@ -509,8 +542,11 @@ step "Connectivity Check"
 # Any HTTP response (even 401/404) proves the server is reachable over TLS.
 # Only a connection failure (code 000) is a real problem; orbit's own
 # authentication check above is the true enrollment signal.
-fleet_http_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 \
-    "$FLEET_URL/api/v1/fleet/status" 2>/dev/null || echo "000")"
+if ! fleet_http_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 \
+    "$FLEET_URL/api/v1/fleet/status" 2>/dev/null)"; then
+    fleet_http_code="000"
+fi
+[[ "$fleet_http_code" =~ ^[0-9]{3}$ ]] || fleet_http_code="000"
 if [[ "$fleet_http_code" != "000" ]]; then
     success "Fleet server responded over HTTPS (HTTP $fleet_http_code)."
 else
