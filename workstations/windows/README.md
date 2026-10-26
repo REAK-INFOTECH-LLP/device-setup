@@ -1,6 +1,6 @@
 # Windows workstation setup
 
-REAK Windows workstations are managed in Fleet. The bootstrap script installs the baseline tools and then enrolls the host in Fleet, unless enrollment is skipped. It is the Windows counterpart of `workstations/ubuntu/setup.sh`.
+REAK Windows workstations are managed in Fleet. The bootstrap script installs the baseline tools and then enrolls the host in Fleet. It is the Windows counterpart of `workstations/ubuntu/setup.sh`.
 
 ## Requirements
 
@@ -8,8 +8,8 @@ REAK Windows workstations are managed in Fleet. The bootstrap script installs th
 - An elevated PowerShell session. Run it from a terminal that was started with **Run as Administrator**.
 - A local `administrator` account. It must exist before the script runs, because it is the account allowed to log in over SSH.
 - A REAK-approved SSH public key value. The script does not include a personal key.
-- Network access to `https://fleet.reak.in`, the Fleet download endpoints, and the vendor download endpoints for Chrome, VS Code, Bruno, Firefox, Go and NVM.
-- Fleet enrollment secret from an authorized Fleet administrator. Do not put it in this repository or shell history. If Orbit is already active, enrollment is skipped.
+- Network access to `https://fleet.reak.in`, the Fleet download endpoints, GitHub (Fleet CLI, opkssh, NVM and WiX), and the vendor download endpoints for Chrome, VS Code, Bruno, Firefox, Go and Docker Desktop.
+- Fleet enrollment secret from an authorized Fleet administrator. Do not put it in this repository or shell history. If a Fleet agent is already running, enrollment is skipped.
 
 ## Bootstrap
 
@@ -21,7 +21,9 @@ $env:ENROLL_SECRET = 'YOUR_FLEET_ENROLL_SECRET'
 .\workstations\windows\setup.ps1
 ```
 
-The script creates the `reak` account with its username as the initial password, installs the OpenSSH server and hardens it for key-only access by `administrator`, and installs Chrome, VS Code, Bruno, Firefox, Go and opkssh. It also configures Firefox's uBlock Origin policy, disables VS Code telemetry, and enrolls the host in Fleet.
+The script creates the `reak` account with its username as the initial password, installs the OpenSSH server and hardens it for key-only access by `administrator`, and installs Chrome, VS Code, Bruno, Firefox, Go, NVM for Windows, opkssh and Docker Desktop. It also installs the GitHub Copilot extension, adds `reak` to the `docker-users` group, configures Firefox's uBlock Origin policy, disables VS Code telemetry, and enrolls the host in Fleet.
+
+The account names and the Fleet URL are fixed. The only settings are the SSH public key and the Fleet enrollment secret; there are no skip or feature flags. Docker Desktop needs WSL2 or Hyper-V and a reboot before its engine can start, but the Fleet MSI is packaged with the portable WiX toolset, so enrollment does not wait for Docker.
 
 Downloaded temporary files use a private directory, and the Go archive is checksum-verified.
 
@@ -35,37 +37,16 @@ Invoke-WebRequest https://it.reak.co.in/workstations/windows/setup.ps1 -OutFile 
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-Baseline setup only, without the Fleet secret:
-
-```powershell
-$env:SSH_PUB_KEY = (Get-Content C:\keys\reak-admin.pub -Raw)
-$env:SKIP_FLEET = '1'
-
-Invoke-WebRequest https://it.reak.co.in/workstations/windows/setup.ps1 -OutFile setup.ps1
-powershell -ExecutionPolicy Bypass -File .\setup.ps1
-```
-
 Do not store `ENROLL_SECRET` in shell history or the repository. The script prompts for the secret on an interactive terminal when `ENROLL_SECRET` is not set.
 
 ## Settings
 
-Settings are read from environment variables. A command-line parameter always wins over the environment variable, and the environment variable wins over the default.
+Settings are read from environment variables. A command-line parameter always wins over the environment variable. The workstation account (`reak`), SSH account (`administrator`) and Fleet URL (`https://fleet.reak.in`) are fixed in the script.
 
-| Variable | Required? | Default | Purpose |
-| --- | --- | --- | --- |
-| `SSH_PUB_KEY` | Yes | — | Approved administrator SSH public key. Validated with `ssh-keygen` before SSH is changed. |
-| `ENROLL_SECRET` | For Fleet enrollment | — | Fleet enrollment secret. The script prompts for it on a terminal when it is missing. |
-| `SKIP_FLEET` | No | `0` | Set to `1` to run the baseline setup only. |
-| `REAK_USERNAME` | No | `reak` | Workstation account to create or use. |
-| `REAK_SSH_USER` | No | `administrator` | Account allowed to SSH. |
-| `FLEET_URL` | No | `https://fleet.reak.in` | Fleet server URL. |
-| `FLEET_PACKAGE_PATH` | No | — | Path to a pre-generated Fleet MSI. Skips local package generation. |
-| `FLEET_WIX_DIR` | No | — | Directory with the WiX v3 binaries (`candle.exe`, `light.exe`, `heat.exe`) used to build the MSI locally. |
-| `FLEET_ENABLE_SCRIPTS` | No | `1` | Set to `0` to disable Fleet script execution on hosts. |
-| `INSTALL_DOCKER` | No | `0` | Install Docker Desktop. It needs WSL2 or Hyper-V and usually a reboot. |
-| `DOCKER_GROUP_ACCESS` | No | `0` | Set to `1` to add the workstation account to the root-equivalent Docker group. |
-| `INSTALL_COPILOT` | No | `0` | Set to `1` to install the GitHub Copilot extension in VS Code. |
-| `INSTALL_NVM` | No | `0` | Set to `1` to install NVM for Windows. |
+| Variable | Required? | Purpose |
+| --- | --- | --- |
+| `SSH_PUB_KEY` | Yes | Approved administrator SSH public key. Validated with `ssh-keygen` before SSH is changed. |
+| `ENROLL_SECRET` | Yes, unless prompted | Fleet enrollment secret. The script prompts for it on a terminal when it is missing. |
 
 ## What the script does
 
@@ -101,34 +82,34 @@ Result: only `administrator` can SSH, using a key; password and root login are o
 
 - Installs Chrome, VS Code and Bruno if they are missing.
 - Disables VS Code telemetry for the workstation account by merging into `settings.json` instead of overwriting it.
-- GitHub Copilot is opt-in with `INSTALL_COPILOT=1`.
+- Installs the GitHub Copilot extension in VS Code.
 - Installs Firefox and applies a policy that force-installs uBlock Origin.
 
 ### 5. Developer tooling
 
 - Installs the latest Go release into `C:\Program Files\Go`, verifies the archive against the checksum published on `dl.google.com`, and adds it to the machine `PATH`.
-- Installs NVM for Windows when `INSTALL_NVM=1` and relocates it to `C:\ProgramData\nvm` so every account on the host can use it.
+- Installs NVM for Windows and relocates it to `C:\ProgramData\nvm` so every account on the host can use it. The installer is a per-user install, so it needs the elevated session and the script continues with a warning if it fails.
 - Installs `opkssh`.
-- Installs Docker Desktop when `INSTALL_DOCKER=1` and adds the workstation account to the `docker-users` group only when `DOCKER_GROUP_ACCESS=1`.
+- Installs Docker Desktop and adds the workstation account to the root-equivalent `docker-users` group. Docker needs WSL2 or Hyper-V and a reboot before the engine can start.
 
 ### 6. Fleet enrollment
 
-If `SKIP_FLEET=1` the script exits successfully after the baseline.
+The script installs the Fleet CLI into `C:\ProgramData\fleetctl`, verifying the downloaded archive against the checksum published with the release. It then downloads the portable WiX v3 toolset (cached in `C:\ProgramData\wix311`) and generates an MSI with `fleetctl package --type=msi --fleet-desktop --enable-scripts --fleet-url=https://fleet.reak.in`.
 
-Otherwise it installs the Fleet CLI into `C:\ProgramData\fleetctl`, verifying the downloaded archive against the checksum published with the release, and then either uses a pre-generated MSI (`FLEET_PACKAGE_PATH`) or generates one with `fleetctl package --type=msi --fleet-desktop`. The generated package is installed with `msiexec`, deleted afterwards, and the script checks that a Fleet service is running and that the Fleet server answers over HTTPS.
+The generated package is installed with `msiexec`, deleted afterwards, and the script checks that a Fleet service is running and that the Fleet server answers over HTTPS. If an agent is already running, enrollment is left unchanged.
 
 The Fleet CLI requires the secret as a command-line argument while generating the package, so it may briefly be visible to local process inspection. The script clears `ENROLL_SECRET` from the environment as soon as the package is built. Rotate the secret if it is ever exposed.
 
 ## Differences from the Ubuntu bootstrap
 
-- Docker Desktop is opt-in. It needs WSL2 or Hyper-V and normally a reboot, which would interrupt the rest of the run.
-- NVM for Windows is opt-in. Its installer is a per-user install, and it needs elevated rights to create symlinks.
-- The Fleet MSI is generated locally only when Docker or a local WiX v3 toolset is available. Building an MSI otherwise needs a build host, so `FLEET_PACKAGE_PATH` is the usual route for a fleet rollout.
+- Docker Desktop needs WSL2 or Hyper-V and normally a reboot, which would interrupt the rest of the run. The script still installs it and continues; enrollment uses WiX instead of Docker.
+- NVM for Windows is a per-user installer. The script runs it elevated and relocates the files to `C:\ProgramData\nvm` so every account can use it.
+- The Fleet MSI is generated on the workstation with the portable WiX v3 toolset, so no pre-built MSI or Docker engine is required.
 - The Fleet agent on Windows registers as `Fleet osquery` rather than an `orbit` systemd unit.
 
 ## Checks
 
-Before any change, the scripts are checked with the PowerShell parser, PSScriptAnalyzer, the Windows PowerShell 5.1 compatibility rules, unit tests for the platform independent helpers, and mocked end-to-end runs of `setup.ps1` and `rollback.ps1` in a PowerShell container. The mocked runs cover the baseline, the Fleet enrollment, a pre-generated package, a host that is already enrolled, a rejected `sshd -t`, a rejected hardening check, an OpenSSH that is too old for `KbdInteractiveAuthentication`, and the rollback.
+Before any change, the scripts are checked with the PowerShell parser, PSScriptAnalyzer, the Windows PowerShell 5.1 compatibility rules, unit tests for the platform independent helpers, and mocked end-to-end runs of `setup.ps1` and `rollback.ps1` in a PowerShell container. The mocked runs cover a full setup, a host that is already enrolled, a rejected `sshd -t`, a rejected hardening check, an OpenSSH that is too old for `KbdInteractiveAuthentication`, and the rollback. The full-setup scenarios set every legacy flag to a value that would break the run if it were still honoured, and then assert that Docker, NVM, Copilot, the Docker group, Fleet scripts and the fixed Fleet URL are still used.
 
 The harness is kept out of this repository. It stubs the Windows APIs, so it proves the control flow and the failure handling but not the Windows calls themselves, and a Windows container cannot close that gap because the Windows images need a Windows host kernel. Running the bootstrap on real Windows hardware is still required before it is used in production.
 
@@ -152,6 +133,7 @@ It restores the SSH configuration, removes the given public key from the authori
 ## Known limitations / follow-up
 
 - The script has been validated with the container checks described above, which cover parsing, static analysis, PowerShell 5.1 compatibility, unit tests and mocked end-to-end runs. It has not yet been run on physical Windows hardware, so the first run should be on a clean virtual machine.
+- Docker Desktop normally needs a reboot before its engine starts. The script installs it and adds the user to `docker-users`, but the reboot is not automated.
 - Vendor installers (Chrome, VS Code, Bruno, Firefox, NVM, Docker Desktop) are downloaded from their vendor URLs and are not cryptographically pinned. The Go archive and the Fleet CLI archive are checksum-verified. Use approved internal mirrors or vendor signature verification for high-threat deployments.
 - The Chrome installer is run with `/system-level`. Confirm the install landed in `C:\Program Files` on the target image, because a per-user install would not be visible to the `reak` account.
 - VS Code is installed here. The Linux bootstrap has an open item to replace it with Zed, and the same decision should be applied here.

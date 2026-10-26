@@ -1,12 +1,14 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    REAK Windows workstation baseline and Fleet enrollment.
+    REAK Windows workstation setup and Fleet enrollment.
 
 .DESCRIPTION
-    Windows counterpart of workstations/ubuntu/setup.sh. Performs the baseline
-    workstation setup (local account, hardened OpenSSH server, developer tools)
-    and then enrolls the host in Fleet, unless enrollment is skipped.
+    Windows counterpart of workstations/ubuntu/setup.sh. Creates the fixed
+    `reak` workstation account, hardens OpenSSH for `administrator`, installs
+    the baseline desktop and developer tools (including Docker Desktop, NVM
+    and the GitHub Copilot extension), and then enrolls the host in Fleet.
+    Only the SSH public key and the Fleet enrollment secret are inputs.
 
     Must run elevated (Administrator). The script mirrors the guarantees of the
     Ubuntu bootstrap: the SSH public key is validated before SSH configuration
@@ -14,54 +16,13 @@
     before the service is restarted, and a failed verification restores the
     previous configuration.
 
-.PARAMETER Username
-    Local workstation account to create or use. Default: reak (or REAK_USERNAME).
-
-.PARAMETER SshUser
-    Local account allowed to log in over SSH. Default: administrator (or
-    REAK_SSH_USER).
-
 .PARAMETER SshPubKey
-    Approved SSH public key for the SSH account. Required. Can also be supplied
-    through the SSH_PUB_KEY environment variable.
+    Approved SSH public key for the `administrator` account. Required. Can also
+    be supplied through the SSH_PUB_KEY environment variable.
 
 .PARAMETER EnrollSecret
     Fleet enrollment secret. Can also be supplied through ENROLL_SECRET. The
     script prompts for it on an interactive terminal when it is missing.
-
-.PARAMETER SkipFleet
-    Run the baseline setup only and do not enroll the host in Fleet.
-
-.PARAMETER FleetUrl
-    Fleet server URL. Default: https://fleet.reak.in
-
-.PARAMETER FleetPackagePath
-    Use a pre-generated Fleet MSI instead of generating one locally. Generating
-    an MSI on Windows needs Docker or a local WiX v3 toolset, so distributing a
-    pre-built MSI is usually simpler.
-
-.PARAMETER FleetWixDir
-    Directory holding the WiX v3 binaries (candle.exe, light.exe, heat.exe) used
-    to build the MSI locally instead of the Docker image.
-
-.PARAMETER FleetDisableScripts
-    Do not pass --enable-scripts to fleetctl, so Fleet cannot run scripts on the
-    host.
-
-.PARAMETER InstallDocker
-    Install Docker Desktop. It needs WSL2 or Hyper-V and usually a reboot, so
-    it is off by default on Windows.
-
-.PARAMETER DockerGroupAccess
-    Add the workstation account to the root-equivalent Docker group.
-
-.PARAMETER InstallCopilot
-    Install the GitHub Copilot extension in VS Code. It is off by default
-    because it has code-sharing and privacy implications.
-
-.PARAMETER InstallNvm
-    Install NVM for Windows. It is off by default because the installer is a
-    per-user install that needs elevated rights to create symlinks.
 
 .EXAMPLE
     $env:SSH_PUB_KEY = (Get-Content C:\keys\reak-admin.pub -Raw)
@@ -73,19 +34,8 @@
     Justification = 'The initial password is the workstation username, which is not a secret. New-LocalUser and Set-LocalUser need a SecureString.')]
 [CmdletBinding()]
 param(
-    [string] $Username = '',
-    [string] $SshUser = '',
     [string] $SshPubKey = '',
-    [string] $EnrollSecret = '',
-    [switch] $SkipFleet,
-    [string] $FleetUrl = '',
-    [string] $FleetPackagePath = '',
-    [string] $FleetWixDir = '',
-    [switch] $FleetDisableScripts,
-    [switch] $InstallDocker,
-    [switch] $DockerGroupAccess,
-    [switch] $InstallCopilot,
-    [switch] $InstallNvm
+    [string] $EnrollSecret = ''
 )
 
 Set-StrictMode -Version 2.0
@@ -168,23 +118,6 @@ function Get-Setting {
     $fromEnv = [Environment]::GetEnvironmentVariable($EnvironmentName)
     if (-not [string]::IsNullOrWhiteSpace($fromEnv)) { return $fromEnv.Trim() }
     return $Default
-}
-
-function Get-FlagSetting {
-    param(
-        [bool] $ParameterValue,
-        [bool] $ParameterProvided,
-        [string] $EnvironmentName,
-        [bool] $Default
-    )
-    if ($ParameterProvided) { return $ParameterValue }
-    $raw = [Environment]::GetEnvironmentVariable($EnvironmentName)
-    if ([string]::IsNullOrWhiteSpace($raw)) { return $Default }
-    switch -Regex ($raw.Trim().ToLowerInvariant()) {
-        '^(1|true|yes|on|enabled?)$' { return $true }
-        '^(0|false|no|off|disabled?)$' { return $false }
-        default { Stop-WithError "Invalid value for ${EnvironmentName}: '$raw'. Use 1 or 0." }
-    }
 }
 
 # ---------------------------------------------------------------------------
@@ -559,20 +492,11 @@ function Get-FleetService {
 # Resolve settings
 # ---------------------------------------------------------------------------
 
-$Username = Get-Setting -ParameterValue $Username -EnvironmentName 'REAK_USERNAME' -Default 'reak'
-$SshUser = Get-Setting -ParameterValue $SshUser -EnvironmentName 'REAK_SSH_USER' -Default 'administrator'
+$Username = 'reak'
+$SshUser = 'administrator'
+$FleetUrl = 'https://fleet.reak.in'
 $SshPubKey = Get-Setting -ParameterValue $SshPubKey -EnvironmentName 'SSH_PUB_KEY' -Default ''
 $EnrollSecret = Get-Setting -ParameterValue $EnrollSecret -EnvironmentName 'ENROLL_SECRET' -Default ''
-$FleetUrl = Get-Setting -ParameterValue $FleetUrl -EnvironmentName 'FLEET_URL' -Default 'https://fleet.reak.in'
-$FleetPackagePath = Get-Setting -ParameterValue $FleetPackagePath -EnvironmentName 'FLEET_PACKAGE_PATH' -Default ''
-$FleetWixDir = Get-Setting -ParameterValue $FleetWixDir -EnvironmentName 'FLEET_WIX_DIR' -Default ''
-
-$skipFleet = Get-FlagSetting -ParameterValue $SkipFleet.IsPresent -ParameterProvided $PSBoundParameters.ContainsKey('SkipFleet') -EnvironmentName 'SKIP_FLEET' -Default $false
-$installDocker = Get-FlagSetting -ParameterValue $InstallDocker.IsPresent -ParameterProvided $PSBoundParameters.ContainsKey('InstallDocker') -EnvironmentName 'INSTALL_DOCKER' -Default $false
-$dockerGroupAccess = Get-FlagSetting -ParameterValue $DockerGroupAccess.IsPresent -ParameterProvided $PSBoundParameters.ContainsKey('DockerGroupAccess') -EnvironmentName 'DOCKER_GROUP_ACCESS' -Default $false
-$installCopilot = Get-FlagSetting -ParameterValue $InstallCopilot.IsPresent -ParameterProvided $PSBoundParameters.ContainsKey('InstallCopilot') -EnvironmentName 'INSTALL_COPILOT' -Default $false
-$installNvm = Get-FlagSetting -ParameterValue $InstallNvm.IsPresent -ParameterProvided $PSBoundParameters.ContainsKey('InstallNvm') -EnvironmentName 'INSTALL_NVM' -Default $false
-$enableFleetScripts = Get-FlagSetting -ParameterValue (-not $FleetDisableScripts.IsPresent) -ParameterProvided $PSBoundParameters.ContainsKey('FleetDisableScripts') -EnvironmentName 'FLEET_ENABLE_SCRIPTS' -Default $true
 
 # ---------------------------------------------------------------------------
 # 1. Preflight
@@ -940,17 +864,13 @@ $settings['telemetry.telemetryLevel'] = 'off'
 $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $vsCodeSettingsFile -Encoding UTF8
 Write-Ok "VS Code telemetry disabled in $vsCodeSettingsFile"
 
-if ($installCopilot) {
-    Write-Info 'Installing the GitHub Copilot extension for VS Code.'
-    $codeExe = Get-Command 'code' -ErrorAction SilentlyContinue
-    if ($codeExe) {
-        & $codeExe.Source --install-extension 'GitHub.copilot' --force *> $null
-        Write-Ok 'GitHub Copilot extension installed.'
-    } else {
-        Write-WarnMessage 'The "code" command is not on PATH yet. Install the extension from the VS Code Extensions view.'
-    }
+Write-Info 'Installing the GitHub Copilot extension for VS Code.'
+$codeExe = Get-Command 'code' -ErrorAction SilentlyContinue
+if ($codeExe) {
+    & $codeExe.Source --install-extension 'GitHub.copilot' --force *> $null
+    Write-Ok 'GitHub Copilot extension installed.'
 } else {
-    Write-Info 'GitHub Copilot is not installed by default. Re-run with INSTALL_COPILOT=1 to install it.'
+    Write-WarnMessage 'The "code" command is not on PATH yet. Install the extension from the VS Code Extensions view.'
 }
 
 $firefoxDir = Join-Path $env:ProgramFiles 'Mozilla Firefox'
@@ -1028,46 +948,42 @@ if (-not (Test-Path -LiteralPath (Join-Path $goInstallDir 'bin\go.exe'))) {
 [Environment]::SetEnvironmentVariable('GOROOT', $goInstallDir, 'Machine')
 Add-MachinePathEntry -Entries @((Join-Path $goInstallDir 'bin'))
 
-if ($installNvm) {
-    Write-Info 'Installing NVM for Windows.'
-    try {
-        $nvmRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/coreybutler/nvm-windows/releases/latest' -UseBasicParsing -Headers @{ 'User-Agent' = 'reak-setup' }
-        $nvmAsset = $nvmRelease.assets | Where-Object { $_.name -match '^nvm-[0-9.]+-x64-setup\.exe$' } | Select-Object -First 1
-        if (-not $nvmAsset) {
-            throw 'No x64 setup asset was found in the latest nvm-windows release.'
-        }
-        $nvmInstaller = Join-Path $workspace 'nvm-setup.exe'
-        Invoke-Download -Uri $nvmAsset.browser_download_url -OutFile $nvmInstaller | Out-Null
-        Invoke-SilentInstaller -FilePath $nvmInstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Description 'NVM for Windows' | Out-Null
-
-        # The installer is a per-user install. Locate it and move it to a
-        # machine-wide location so every account on the host can use it.
-        $nvmCandidates = @(
-            (Join-Path $env:ProgramData 'nvm\nvm.exe'),
-            (Join-Path $env:APPDATA 'nvm\nvm.exe'),
-            (Join-Path $env:LOCALAPPDATA 'nvm\nvm.exe')
-        )
-        $nvmExe = $nvmCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-        if (-not $nvmExe) {
-            throw 'nvm.exe was not found after the installation.'
-        }
-        $nvmHome = Split-Path -Parent $nvmExe
-        $machineNvmHome = Join-Path $env:ProgramData 'nvm'
-        if (-not (Test-Path -LiteralPath (Join-Path $machineNvmHome 'nvm.exe'))) {
-            New-Item -ItemType Directory -Path $machineNvmHome -Force | Out-Null
-            Copy-Item -Path (Join-Path $nvmHome '*') -Destination $machineNvmHome -Recurse -Force
-            $nvmHome = $machineNvmHome
-        }
-        $nvmSymlink = Join-Path $env:ProgramFiles 'nodejs'
-        [Environment]::SetEnvironmentVariable('NVM_HOME', $nvmHome, 'Machine')
-        [Environment]::SetEnvironmentVariable('NVM_SYMLINK', $nvmSymlink, 'Machine')
-        Add-MachinePathEntry -Entries @($nvmHome, $nvmSymlink)
-        Write-Ok "NVM for Windows installed in $nvmHome. Run 'nvm install lts' in an elevated shell to add a Node.js version."
-    } catch {
-        Write-WarnMessage "NVM for Windows could not be installed automatically ($($_.Exception.Message))."
+Write-Info 'Installing NVM for Windows.'
+try {
+    $nvmRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/coreybutler/nvm-windows/releases/latest' -UseBasicParsing -Headers @{ 'User-Agent' = 'reak-setup' }
+    $nvmAsset = $nvmRelease.assets | Where-Object { $_.name -match '^nvm-[0-9.]+-x64-setup\.exe$' } | Select-Object -First 1
+    if (-not $nvmAsset) {
+        throw 'No x64 setup asset was found in the latest nvm-windows release.'
     }
-} else {
-    Write-Info 'NVM for Windows is not installed by default. Re-run with INSTALL_NVM=1 to install it.'
+    $nvmInstaller = Join-Path $workspace 'nvm-setup.exe'
+    Invoke-Download -Uri $nvmAsset.browser_download_url -OutFile $nvmInstaller | Out-Null
+    Invoke-SilentInstaller -FilePath $nvmInstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Description 'NVM for Windows' | Out-Null
+
+    # The installer is a per-user install. Locate it and move it to a
+    # machine-wide location so every account on the host can use it.
+    $nvmCandidates = @(
+        (Join-Path $env:ProgramData 'nvm\nvm.exe'),
+        (Join-Path $env:APPDATA 'nvm\nvm.exe'),
+        (Join-Path $env:LOCALAPPDATA 'nvm\nvm.exe')
+    )
+    $nvmExe = $nvmCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $nvmExe) {
+        throw 'nvm.exe was not found after the installation.'
+    }
+    $nvmHome = Split-Path -Parent $nvmExe
+    $machineNvmHome = Join-Path $env:ProgramData 'nvm'
+    if (-not (Test-Path -LiteralPath (Join-Path $machineNvmHome 'nvm.exe'))) {
+        New-Item -ItemType Directory -Path $machineNvmHome -Force | Out-Null
+        Copy-Item -Path (Join-Path $nvmHome '*') -Destination $machineNvmHome -Recurse -Force
+        $nvmHome = $machineNvmHome
+    }
+    $nvmSymlink = Join-Path $env:ProgramFiles 'nodejs'
+    [Environment]::SetEnvironmentVariable('NVM_HOME', $nvmHome, 'Machine')
+    [Environment]::SetEnvironmentVariable('NVM_SYMLINK', $nvmSymlink, 'Machine')
+    Add-MachinePathEntry -Entries @($nvmHome, $nvmSymlink)
+    Write-Ok "NVM for Windows installed in $nvmHome. Run 'nvm install lts' in an elevated shell to add a Node.js version."
+} catch {
+    Write-WarnMessage "NVM for Windows could not be installed automatically ($($_.Exception.Message))."
 }
 
 $opksshDir = Join-Path $env:ProgramFiles 'opkssh'
@@ -1080,32 +996,22 @@ if (-not (Test-Path -LiteralPath (Join-Path $opksshDir 'opkssh.exe'))) {
 }
 Add-MachinePathEntry -Entries @($opksshDir)
 
-if ($installDocker) {
-    Write-Info 'Installing Docker Desktop. This needs WSL2 or Hyper-V and usually a reboot.'
-    try {
-        $dockerInstaller = Join-Path $workspace 'docker-installer.exe'
-        Invoke-Download -Uri 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe' -OutFile $dockerInstaller | Out-Null
-        Invoke-SilentInstaller -FilePath $dockerInstaller -ArgumentList @('install', '--quiet', '--accept-license', '--backend=wsl-2') -Description 'Docker Desktop' | Out-Null
-        Write-Ok 'Docker Desktop installed. A reboot is required before the engine can start.'
-    } catch {
-        Write-WarnMessage "Docker Desktop could not be installed automatically ($($_.Exception.Message))."
-    }
-    if ($dockerGroupAccess) {
-        try {
-            $dockerUsers = Get-LocalGroupBySid -Sid $script:DockerUsersSid
-            Add-LocalGroupMember -Group $dockerUsers -Member $Username -ErrorAction Stop
-            Write-Ok "Added '$Username' to the $dockerUsers group. This is root-equivalent access."
-        } catch {
-            Write-WarnMessage "Could not add '$Username' to the Docker group ($($_.Exception.Message))."
-        }
-    } else {
-        Write-Info "Leaving '$Username' out of the root-equivalent Docker group."
-    }
-} else {
-    Write-Info 'Docker Desktop is not installed by default. Re-run with INSTALL_DOCKER=1 to install it.'
-    if ($dockerGroupAccess) {
-        Write-WarnMessage 'DOCKER_GROUP_ACCESS was requested but Docker Desktop is not installed.'
-    }
+Write-Info 'Installing Docker Desktop. This needs WSL2 or Hyper-V and usually a reboot.'
+try {
+    $dockerInstaller = Join-Path $workspace 'docker-installer.exe'
+    Invoke-Download -Uri 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe' -OutFile $dockerInstaller | Out-Null
+    Invoke-SilentInstaller -FilePath $dockerInstaller -ArgumentList @('install', '--quiet', '--accept-license', '--backend=wsl-2') -Description 'Docker Desktop' | Out-Null
+    Write-Ok 'Docker Desktop installed. A reboot is required before the engine can start.'
+} catch {
+    Write-WarnMessage "Docker Desktop could not be installed automatically ($($_.Exception.Message))."
+}
+
+try {
+    $dockerUsers = Get-LocalGroupBySid -Sid $script:DockerUsersSid
+    Add-LocalGroupMember -Group $dockerUsers -Member $Username -ErrorAction Stop
+    Write-Ok "Added '$Username' to the $dockerUsers group. This is root-equivalent access."
+} catch {
+    Write-WarnMessage "Could not add '$Username' to the Docker group ($($_.Exception.Message))."
 }
 
 # ---------------------------------------------------------------------------
@@ -1113,13 +1019,6 @@ if ($installDocker) {
 # ---------------------------------------------------------------------------
 
 Write-Step '6/6 Fleet enrollment'
-
-if ($skipFleet) {
-    Write-Info 'Skipping Fleet enrollment (SKIP_FLEET=1).'
-    Write-Ok 'Baseline setup complete.'
-    Remove-TemporaryWorkspace -Path $workspace
-    exit 0
-}
 
 $fleetServices = Get-FleetService
 $runningFleetService = @($fleetServices | Where-Object { $_.Status -eq 'Running' })
@@ -1219,62 +1118,48 @@ if ([string]::IsNullOrWhiteSpace($EnrollSecret)) {
     Stop-WithError 'The enrollment secret cannot be empty.'
 }
 
-$msiPath = ''
-if (-not [string]::IsNullOrWhiteSpace($FleetPackagePath)) {
-    if (-not (Test-Path -LiteralPath $FleetPackagePath)) {
-        Stop-WithError "The Fleet package '$FleetPackagePath' does not exist."
-    }
-    $msiPath = Join-Path $workspace 'fleet-osquery.msi'
-    Copy-Item -LiteralPath $FleetPackagePath -Destination $msiPath -Force
-    Write-Ok "Using the pre-generated Fleet package $FleetPackagePath."
-} else {
-    Write-Info "Generating the Fleet agent package for $FleetUrl."
-    $packageArgs = @(
-        'package',
-        '--type=msi',
-        '--fleet-desktop',
-        "--fleet-url=$FleetUrl",
-        "--enroll-secret=$EnrollSecret"
-    )
-    if ($enableFleetScripts) { $packageArgs += '--enable-scripts' }
-    if (-not [string]::IsNullOrWhiteSpace($FleetWixDir)) {
-        if (-not (Test-Path -LiteralPath $FleetWixDir)) {
-            Stop-WithError "The WiX directory '$FleetWixDir' does not exist."
-        }
-        $packageArgs += "--local-wix-dir=$FleetWixDir"
-    } elseif (-not (Get-Command 'docker' -ErrorAction SilentlyContinue)) {
-        # Auto-download portable WiX Toolset v3.11.2 binaries so MSI generation succeeds without Docker.
-        $wixInstallDir = Join-Path $env:ProgramData 'wix311'
-        $candleExe = Join-Path $wixInstallDir 'candle.exe'
-        if (-not (Test-Path -LiteralPath $candleExe)) {
-            Write-Info 'Downloading portable WiX Toolset v3.11.2 for MSI packaging...'
-            New-Item -ItemType Directory -Path $wixInstallDir -Force | Out-Null
-            $wixZip = Join-Path $workspace 'wix311-binaries.zip'
-            $wixUrl = 'https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip'
-            Invoke-Download -Uri $wixUrl -OutFile $wixZip | Out-Null
-            Expand-ArchiveFile -ArchivePath $wixZip -Destination $wixInstallDir
-            Write-Ok 'Portable WiX Toolset installed.'
-        }
-        $packageArgs += "--local-wix-dir=$wixInstallDir"
-    }
+Write-Info "Generating the Fleet agent package for $FleetUrl."
+$packageArgs = @(
+    'package',
+    '--type=msi',
+    '--fleet-desktop',
+    '--enable-scripts',
+    "--fleet-url=$FleetUrl",
+    "--enroll-secret=$EnrollSecret"
+)
 
-    Push-Location $workspace
-    try {
-        $packageResult = Invoke-Native -FilePath $fleetctlExe -ArgumentList $packageArgs
-        if ($packageResult.ExitCode -ne 0) {
-            Stop-WithError "Fleet package generation failed: $($packageResult.Output -join ' ')"
-        }
-    } finally {
-        Pop-Location
-    }
-
-    $generated = Get-ChildItem -Path $workspace -Filter 'fleet-osquery*.msi' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $generated) {
-        Stop-WithError 'The generated Fleet package was not found.'
-    }
-    $msiPath = $generated.FullName
-    Write-Ok "Fleet package generated: $msiPath"
+# Always use the portable WiX v3 toolset. Docker Desktop may have just been
+# installed and still need a reboot, so it is not a reliable packaging backend
+# during the same run.
+$wixInstallDir = Join-Path $env:ProgramData 'wix311'
+$candleExe = Join-Path $wixInstallDir 'candle.exe'
+if (-not (Test-Path -LiteralPath $candleExe)) {
+    Write-Info 'Downloading portable WiX Toolset v3.11.2 for MSI packaging...'
+    New-Item -ItemType Directory -Path $wixInstallDir -Force | Out-Null
+    $wixZip = Join-Path $workspace 'wix311-binaries.zip'
+    $wixUrl = 'https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip'
+    Invoke-Download -Uri $wixUrl -OutFile $wixZip | Out-Null
+    Expand-ArchiveFile -ArchivePath $wixZip -Destination $wixInstallDir
+    Write-Ok 'Portable WiX Toolset installed.'
 }
+$packageArgs += "--local-wix-dir=$wixInstallDir"
+
+Push-Location $workspace
+try {
+    $packageResult = Invoke-Native -FilePath $fleetctlExe -ArgumentList $packageArgs
+    if ($packageResult.ExitCode -ne 0) {
+        Stop-WithError "Fleet package generation failed: $($packageResult.Output -join ' ')"
+    }
+} finally {
+    Pop-Location
+}
+
+$generated = Get-ChildItem -Path $workspace -Filter 'fleet-osquery*.msi' -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $generated) {
+    Stop-WithError 'The generated Fleet package was not found.'
+}
+$msiPath = $generated.FullName
+Write-Ok "Fleet package generated: $msiPath"
 
 # The secret was embedded in the package, so drop it from the environment.
 $EnrollSecret = $null

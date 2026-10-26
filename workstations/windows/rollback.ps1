@@ -15,13 +15,6 @@
       -RemoveUser  delete the workstation user account and its profile.
       -RemoveApps  best-effort removal of the applications installed by setup.ps1.
 
-.PARAMETER Username
-    Workstation account. Default: reak (or REAK_USERNAME).
-
-.PARAMETER SshUser
-    Account allowed to log in over SSH. Default: administrator (or
-    REAK_SSH_USER).
-
 .PARAMETER SshPubKey
     The public key to remove. Can also be supplied through SSH_PUB_KEY.
 
@@ -31,8 +24,6 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $Username = '',
-    [string] $SshUser = '',
     [string] $SshPubKey = '',
     [switch] $RemoveUser,
     [switch] $RemoveApps
@@ -150,8 +141,8 @@ function Uninstall-MsiProduct {
 # Resolve settings
 # ---------------------------------------------------------------------------
 
-$Username = Get-Setting -ParameterValue $Username -EnvironmentName 'REAK_USERNAME' -Default 'reak'
-$SshUser = Get-Setting -ParameterValue $SshUser -EnvironmentName 'REAK_SSH_USER' -Default 'administrator'
+$Username = 'reak'
+$SshUser = 'administrator'
 $SshPubKey = Get-Setting -ParameterValue $SshPubKey -EnvironmentName 'SSH_PUB_KEY' -Default ''
 
 if (-not (Test-Administrator)) {
