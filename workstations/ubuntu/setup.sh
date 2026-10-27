@@ -4,6 +4,8 @@ set -euo pipefail
 # Ubuntu workstation baseline for REAK. Run with sudo.
 # The workstation account and SSH account are fixed; only the SSH public key
 # and Fleet enrollment secret are supplied at runtime.
+#
+# Updated: 2026-10-27
 
 USERNAME="reak"
 SSH_USER="administrator"
