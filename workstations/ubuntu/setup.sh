@@ -168,8 +168,40 @@ if ! command -v docker >/dev/null 2>&1; then
   wget -qO- https://get.docker.com | sh
 fi
 getent group docker >/dev/null 2>&1 || groupadd --system docker
+
+# Ensure docker service is running before fixing socket permissions
+if ! systemctl is-active --quiet docker; then
+  systemctl start docker
+  log "Docker service started"
+fi
+
+# Wait for docker socket to be created
+log "Waiting for docker socket..."
+for i in {1..10}; do
+  if [[ -S /var/run/docker.sock ]]; then
+    break
+  fi
+  sleep 1
+done
+
+if [[ -S /var/run/docker.sock ]]; then
+  chown root:docker /var/run/docker.sock
+  chmod 660 /var/run/docker.sock
+  log "Docker socket permissions set: root:docker (660)"
+else
+  warn "Docker socket not found at /var/run/docker.sock"
+fi
+
 log "Granting '$USERNAME' access to the root-equivalent docker group."
 usermod -aG docker "$USERNAME"
+if ! id -nG "$USERNAME" | grep -qw docker; then
+  die "Failed to add '$USERNAME' to docker group."
+fi
+
+log "'$USERNAME' added to docker group."
+log "To use docker without sudo, either:"
+log "  1. Logout and login again, OR"
+log "  2. Run: newgrp docker"
 
 install_deb() {
   local url="$1" package_name="$2" download_dir path
@@ -290,6 +322,15 @@ if [[ ! -x /usr/local/bin/opkssh ]]; then
     -O /usr/local/bin/opkssh
   chmod 755 /usr/local/bin/opkssh
 fi
+
+log "Setting full ownership and permissions for '$USERNAME' home directory."
+chown -R "$USERNAME:$USERNAME" "/home/$USERNAME"
+chmod 755 "/home/$USERNAME"
+find "/home/$USERNAME" -type d -exec chmod 755 {} \;
+find "/home/$USERNAME" -type f -exec chmod 644 {} \;
+chmod 700 "/home/$USERNAME/.ssh" 2>/dev/null || true
+find "/home/$USERNAME" -path '*/.ssh/*' -type f -exec chmod 600 {} \; 2>/dev/null || true
+log "Home directory permissions set: directories=755, files=644, .ssh=700, .ssh files=600"
 
 log "Baseline setup complete. Continuing with Fleet enrollment."
 
