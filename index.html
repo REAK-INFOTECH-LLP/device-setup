@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="REAK workstation setup script">
+  <title>REAK Setup</title>
+  <style>
+    :root {
+      --bg: #151411;
+      --surface: #211f1b;
+      --surface-2: #292620;
+      --border: #464137;
+      --text: #f4f0e7;
+      --muted: #c7c0b3;
+      --accent: #65e68c;
+      --accent-strong: #29b966;
+      --code: #0e0d0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0 auto;
+      width: 100%;
+      max-width: 800px;
+      overflow-x: hidden;
+      background: radial-gradient(circle at 85% 0%, #2a3827 0, transparent 32rem), var(--bg);
+      color: var(--text);
+      font: 17px/1.75 "Segoe UI", system-ui, sans-serif;
+    }
+    a { color: var(--accent); overflow-wrap: anywhere; }
+    .wrap { width: 100%; max-width: 800px; margin: 0 auto; padding: 56px 24px 72px; }
+    h1 { margin: 0 0 10px; font-size: 34px; line-height: 1.3; letter-spacing: -.6px; overflow-wrap: anywhere; }
+    h2 { margin: 40px 0 4px; font-size: 21px; line-height: 1.4; letter-spacing: -.2px; }
+    h2:first-of-type { margin-top: 28px; }
+    p { margin: 0 0 20px; color: var(--muted); }
+    .hint { margin: 0 0 0; font-size: 15px; }
+    .updated { font-size: 13px; margin: 18px 0 0; }
+    code { font-family: Consolas, monospace; overflow-wrap: anywhere; }
+    .panel {
+      width: 100%;
+      max-width: 100%;
+      background: linear-gradient(145deg, rgba(41, 185, 102, .14), rgba(33, 31, 27, .7) 48%);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, .18);
+      padding: 28px;
+      margin: 24px 0;
+    }
+    .codebox { position: relative; width: 100%; max-width: 100%; }
+    .copy-button {
+      position: absolute;
+      top: 9px;
+      right: 9px;
+      z-index: 1;
+      padding: 4px 10px;
+      color: var(--accent);
+      background: var(--surface-2);
+      border: 1px solid var(--accent-strong);
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .copy-button:hover { color: var(--bg); background: var(--accent); }
+    pre {
+      max-width: 100%;
+      margin: 0;
+      overflow: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 18px;
+      background: var(--code);
+      color: #f0eadf;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+    .btn {
+      display: inline-block;
+      background: var(--accent-strong);
+      color: #0d0c0b;
+      font-weight: 700;
+      border-radius: 8px;
+      padding: 10px 22px;
+      margin-top: 6px;
+    }
+    .btn:hover { background: var(--accent); color: #0d0c0b; text-decoration: none; }
+    @media (max-width: 760px) {
+      .wrap { padding: 30px 16px 52px; }
+      .panel { padding: 20px 16px; }
+      h1 { font-size: 26px; }
+      pre { font-size: 12px; padding: 14px; padding-top: 38px; }
+      .btn { display: block; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>REAK Workstation Setup</h1>
+    <p>Run the command for your platform. The workstation account is <code>reak</code> and the SSH account is <code>administrator</code>; only the SSH public key and Fleet enrollment secret are required.</p>
+
+    <h2>Ubuntu</h2>
+    <p class="hint">Run from a terminal on a fresh Ubuntu amd64 desktop. You will be prompted for the administrator SSH public key and the Fleet enrollment secret. Only those two values are required; there are no skip or feature flags. Do not use <code>sudo -E</code>; its environment is commonly cleared by sudoers.</p>
+    <div class="panel">
+      <div class="codebox">
+        <button class="copy-button" onclick="copyBlock(this)">Copy</button>
+        <pre><code>wget -qO /tmp/reak-setup.sh https://it.reak.co.in/workstations/ubuntu/setup.sh
+sudo bash /tmp/reak-setup.sh</code></pre>
+      </div>
+      <p class="hint">For a non-interactive run, enter a root shell and export the same two values:</p>
+      <div class="codebox">
+        <button class="copy-button" onclick="copyBlock(this)">Copy</button>
+        <pre><code>sudo -i
+export SSH_PUB_KEY="$(cat /path/to/reak-admin.pub)"
+read -rsp "Fleet enrollment secret: " ENROLL_SECRET; printf '\n'; export ENROLL_SECRET
+bash /tmp/reak-setup.sh</code></pre>
+      </div>
+      <a class="btn" href="https://it.reak.co.in/workstations/ubuntu/setup.sh">Download setup.sh</a>
+    </div>
+    <p class="updated">Script last updated: <span id="last-updated-ubuntu">loading…</span></p>
+
+    <h2>Windows</h2>
+    <p class="hint">Run from PowerShell started as Administrator on a Windows x64 desktop. The defaults are <code>reak</code> and <code>administrator</code>; set only the SSH public key and Fleet enrollment secret.</p>
+    <div class="panel">
+      <div class="codebox">
+        <button class="copy-button" onclick="copyBlock(this)">Copy</button>
+        <pre><code>$env:SSH_PUB_KEY = "YOUR_ADMIN_PUBLIC_KEY"
+$env:ENROLL_SECRET = "YOUR_FLEET_ENROLL_SECRET"
+
+Invoke-WebRequest https://it.reak.co.in/workstations/windows/setup.ps1 -OutFile setup.ps1
+powershell -ExecutionPolicy Bypass -File .\setup.ps1</code></pre>
+      </div>
+      <a class="btn" href="https://it.reak.co.in/workstations/windows/setup.ps1">Download setup.ps1</a>
+    </div>
+    <p class="updated">Script last updated: <span id="last-updated-windows">loading…</span></p>
+  </div>
+  <script>
+    var REPO = "https://api.github.com/repos/REAK-INFOTECH-LLP/device-setup/commits";
+    var BRANCH = "feature/setup-fleet-enrollment";
+
+    function showLastUpdated(path, elementId) {
+      fetch(REPO + "?path=" + encodeURIComponent(path) + "&sha=" + BRANCH + "&per_page=1")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.length) { throw new Error("no commits"); }
+          var ist = new Date(d[0].commit.author.date).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+            day: "2-digit", month: "short", year: "numeric",
+            hour: "2-digit", minute: "2-digit", hour12: true
+          });
+          document.getElementById(elementId).textContent = ist + " IST";
+        })
+        .catch(function () { document.getElementById(elementId).textContent = "unavailable"; });
+    }
+
+    showLastUpdated("workstations/ubuntu/setup.sh", "last-updated-ubuntu");
+    showLastUpdated("workstations/windows/setup.ps1", "last-updated-windows");
+
+    function copyBlock(button) {
+      const text = button.parentElement.querySelector("code").innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        button.textContent = "Copied";
+        setTimeout(() => button.textContent = "Copy", 1400);
+      });
+    }
+  </script>
+</body>
+</html>
