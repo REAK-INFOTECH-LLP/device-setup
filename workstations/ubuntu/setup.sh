@@ -38,7 +38,7 @@ prompt_secret() {
 [[ "${EUID}" -eq 0 ]] || die "Run this script with sudo/root."
 command -v apt-get >/dev/null || die "This script supports Debian-based Ubuntu systems only."
 ARCH="$(dpkg --print-architecture)"
-[[ "$ARCH" == "amd64" ]] || die "This script supports amd64 only; found $ARCH."
+[[ "$ARCH" == "amd64" || "$ARCH" == "arm64" ]] || die "This script supports amd64 and arm64 only; found $ARCH."
 id "$SSH_USER" >/dev/null 2>&1 || die "Required SSH account '$SSH_USER' does not exist. Create it during OS installation."
 
 if [[ -z "$SSH_PUB_KEY" && -n "$SSH_PUB_KEY_FILE" ]]; then
@@ -235,15 +235,27 @@ install_deb() {
 
 if ! command -v google-chrome >/dev/null 2>&1; then
   log "Installing Chrome."
-  install_deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb chrome.deb
+  if [[ "$ARCH" == "arm64" ]]; then
+    install_deb https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb chrome.deb
+  else
+    install_deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb chrome.deb
+  fi
 fi
 if ! command -v bruno >/dev/null 2>&1; then
   log "Installing Bruno 2.9.1."
-  install_deb https://github.com/usebruno/bruno/releases/download/v2.9.1/bruno_2.9.1_amd64_linux.deb bruno.deb
+  if [[ "$ARCH" == "arm64" ]]; then
+    install_deb https://github.com/usebruno/bruno/releases/download/v2.9.1/bruno_2.9.1_arm64_linux.deb bruno.deb
+  else
+    install_deb https://github.com/usebruno/bruno/releases/download/v2.9.1/bruno_2.9.1_amd64_linux.deb bruno.deb
+  fi
 fi
 if ! command -v code >/dev/null 2>&1; then
   log "Installing VS Code."
-  install_deb 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64' vscode.deb
+  if [[ "$ARCH" == "arm64" ]]; then
+    install_deb 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-arm64' vscode.deb
+  else
+    install_deb 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64' vscode.deb
+  fi
 fi
 
 assert_not_symlink "/home/$USERNAME"
@@ -314,11 +326,11 @@ if ! command -v go >/dev/null 2>&1; then
   [[ "$go_version" =~ ^go[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || die "Could not determine a valid Go release."
   log "Installing $go_version."
   go_download_dir="$(mktemp -d /tmp/reak-go.XXXXXX)"
-  go_archive="$go_download_dir/${go_version}.linux-amd64.tar.gz"
-  wget -q "https://go.dev/dl/${go_version}.linux-amd64.tar.gz" -O "$go_archive"
+  go_archive="$go_download_dir/${go_version}.linux-${ARCH}.tar.gz"
+  wget -q "https://go.dev/dl/${go_version}.linux-${ARCH}.tar.gz" -O "$go_archive"
   # NOTE: go.dev serves an HTML page for the .sha256 URL, so fetch the bare
   # hash from dl.google.com instead, then compare digests explicitly.
-  wget -q "https://dl.google.com/go/${go_version}.linux-amd64.tar.gz.sha256" -O "$go_archive.sha256"
+  wget -q "https://dl.google.com/go/${go_version}.linux-${ARCH}.tar.gz.sha256" -O "$go_archive.sha256"
   # go.dev publishes the .sha256 file as a bare hash, which `sha256sum -c`
   # cannot parse directly, so compare the digests explicitly.
   expected_sum="$(tr -d '[:space:]' < "$go_archive.sha256")"
@@ -332,7 +344,7 @@ fi
 
 if [[ ! -x /usr/local/bin/opkssh ]]; then
   log "Installing opkssh."
-  wget -q https://github.com/openpubkey/opkssh/releases/latest/download/opkssh-linux-amd64 \
+  wget -q "https://github.com/openpubkey/opkssh/releases/latest/download/opkssh-linux-${ARCH}" \
     -O /usr/local/bin/opkssh
   chmod 755 /usr/local/bin/opkssh
 fi
@@ -379,7 +391,7 @@ umask 077
 # ============================================================
 # Fleet Enrollment Setup (fixed)
 # Server: https://fleet.reak.in
-# OS: Ubuntu / Debian (amd64)
+# OS: Ubuntu / Debian (amd64, arm64)
 # ============================================================
 
 FLEET_URL="https://fleet.reak.in"
@@ -452,7 +464,7 @@ for cmd in dpkg dpkg-query curl systemctl stat install; do
 done
 
 ARCH="$(dpkg --print-architecture)"
-[[ "$ARCH" == "amd64" ]] || die "This script supports amd64 only; found $ARCH."
+[[ "$ARCH" == "amd64" || "$ARCH" == "arm64" ]] || die "This script supports amd64 and arm64 only; found $ARCH."
 success "Architecture: $ARCH"
 
 # ---------- 2. Fleet CLI ----------
@@ -563,6 +575,7 @@ if [[ "$needs_enrollment" -eq 1 ]]; then
 
   fleet_package_args=(
       --type=deb
+      --arch="$ARCH"
       --fleet-desktop
       --enable-scripts
       --fleet-url="$FLEET_URL"
