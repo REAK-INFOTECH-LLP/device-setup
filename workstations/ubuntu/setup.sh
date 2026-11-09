@@ -5,7 +5,7 @@ set -euo pipefail
 # The workstation account and SSH account are fixed; only the SSH public key
 # and Fleet enrollment secret are supplied at runtime.
 #
-# Updated: 2026-10-27
+# Updated: 2026-11-09
 
 USERNAME="reak"
 SSH_USER="administrator"
@@ -66,6 +66,23 @@ if ! id "$USERNAME" >/dev/null 2>&1; then
   else
     useradd --create-home --shell /bin/bash "$USERNAME"
   fi
+fi
+
+# Ensure home directory exists, is owned by $USERNAME, and has default skeleton files
+if [[ ! -d "/home/$USERNAME" ]]; then
+  log "Creating missing home directory for '$USERNAME'."
+  mkdir -p "/home/$USERNAME"
+  cp -rT /etc/skel "/home/$USERNAME" 2>/dev/null || true
+fi
+usermod -d "/home/$USERNAME" "$USERNAME" 2>/dev/null || true
+chown -R "$USERNAME:$USERNAME" "/home/$USERNAME"
+chmod 755 "/home/$USERNAME"
+
+# Ensure pam_mkhomedir is active so graphical/TTY login never fails with "home directory not found"
+if ! grep -q "pam_mkhomedir.so" /etc/pam.d/common-session 2>/dev/null; then
+  log "Enabling pam_mkhomedir to guarantee automatic home directory creation on login."
+  DEBIAN_FRONTEND=noninteractive pam-auth-update --enable mkhomedir 2>/dev/null || \
+    echo 'session optional pam_mkhomedir.so skel=/etc/skel umask=0022' >> /etc/pam.d/common-session
 fi
 
 log "Setting password for '$USERNAME'."
@@ -274,20 +291,22 @@ if [[ ! -d "/home/$USERNAME/.nvm" ]]; then
   rm -rf "$nvm_download_dir"
 fi
 
-# The NVM installer only wires bash files, so zsh and login shells would
-# otherwise lack the `nvm` command. Ensure sourcing in every interactive
-# startup file (idempotent; also repairs hosts installed before this fix).
+# Wire NVM and tool PATHs into every interactive and login startup file
+# (.bashrc, .profile, .zshrc) so commands are always found.
 nvm_source_block='export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion'
-for nvm_rc in .bashrc .profile .zshrc; do
-  nvm_rcfile="/home/$USERNAME/$nvm_rc"
-  assert_not_symlink "$nvm_rcfile"
-  touch "$nvm_rcfile"
-  grep -qxF 'export NVM_DIR="$HOME/.nvm"' "$nvm_rcfile" || printf '\n%s\n' "$nvm_source_block" >> "$nvm_rcfile"
-  chown "$USERNAME:$USERNAME" "$nvm_rcfile"
+user_path_block='export PATH="$HOME/.local/bin:$HOME/bin:$HOME/go/bin:/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.fleetctl:$PATH"'
+
+for rc in .bashrc .profile .zshrc; do
+  rcfile="/home/$USERNAME/$rc"
+  assert_not_symlink "$rcfile"
+  touch "$rcfile"
+  grep -qxF 'export NVM_DIR="$HOME/.nvm"' "$rcfile" || printf '\n%s\n' "$nvm_source_block" >> "$rcfile"
+  grep -qxF "$user_path_block" "$rcfile" || printf '\n%s\n' "$user_path_block" >> "$rcfile"
+  chown "$USERNAME:$USERNAME" "$rcfile"
 done
-log 'NVM is wired into .bashrc, .profile and .zshrc. Open a new shell (or run: export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh") to use `nvm`.'
+log 'NVM and software PATHs are wired into .bashrc, .profile and .zshrc.'
 
 if ! command -v go >/dev/null 2>&1; then
   go_version="$(wget -qO- 'https://go.dev/VERSION?m=text')"
@@ -309,13 +328,6 @@ if ! command -v go >/dev/null 2>&1; then
   rm -rf /usr/local/go
   tar -C /usr/local -xzf "$go_archive"
   rm -rf "$go_download_dir"
-  for rcfile in .profile .bashrc .zshrc; do
-    assert_not_symlink "/home/$USERNAME/$rcfile"
-    touch "/home/$USERNAME/$rcfile"
-    grep -qxF 'export PATH="$PATH:/usr/local/go/bin:$HOME/go/bin"' "/home/$USERNAME/$rcfile" || \
-      printf '\nexport PATH="$PATH:/usr/local/go/bin:$HOME/go/bin"\n' >> "/home/$USERNAME/$rcfile"
-    chown "$USERNAME:$USERNAME" "/home/$USERNAME/$rcfile"
-  done
 fi
 
 if [[ ! -x /usr/local/bin/opkssh ]]; then
@@ -325,14 +337,39 @@ if [[ ! -x /usr/local/bin/opkssh ]]; then
   chmod 755 /usr/local/bin/opkssh
 fi
 
-log "Setting full ownership and permissions for '$USERNAME' home directory."
+log "Ensuring ownership and permissions for '$USERNAME' home directory."
 chown -R "$USERNAME:$USERNAME" "/home/$USERNAME"
 chmod 755 "/home/$USERNAME"
-find "/home/$USERNAME" -type d -exec chmod 755 {} \;
-find "/home/$USERNAME" -type f -exec chmod 644 {} \;
-chmod 700 "/home/$USERNAME/.ssh" 2>/dev/null || true
-find "/home/$USERNAME" -path '*/.ssh/*' -type f -exec chmod 600 {} \; 2>/dev/null || true
-log "Home directory permissions set: directories=755, files=644, .ssh=700, .ssh files=600"
+if [[ -d "/home/$USERNAME/.ssh" ]]; then
+  chmod 700 "/home/$USERNAME/.ssh"
+  find "/home/$USERNAME/.ssh" -type f -exec chmod 600 {} + 2>/dev/null || true
+fi
+
+# Repair / restore execute permissions on user binaries and scripts
+log "Restoring executable permissions on user binaries and scripts..."
+for bindir in "/home/$USERNAME/.local/bin" "/home/$USERNAME/bin" "/home/$USERNAME/go/bin" "/home/$USERNAME/.cargo/bin" "/home/$USERNAME/.fleetctl"; do
+  if [[ -d "$bindir" ]]; then
+    chmod -R +x "$bindir" 2>/dev/null || true
+  fi
+done
+
+if [[ -d "/home/$USERNAME/.local" ]]; then
+  find "/home/$USERNAME/.local" -type f -path '*/bin/*' -exec chmod +x {} + 2>/dev/null || true
+fi
+
+if [[ -d "/home/$USERNAME/.nvm" ]]; then
+  find "/home/$USERNAME/.nvm" -type f -path '*/bin/*' ! -name "*.md" ! -name "*.json" ! -name "*.txt" ! -name "*.ts" -exec chmod +x {} + 2>/dev/null || true
+fi
+
+find "/home/$USERNAME" -maxdepth 6 -type f ! -perm -111 2>/dev/null | while IFS= read -r f; do
+  if [[ -f "$f" ]]; then
+    head_magic="$(head -c 4 "$f" 2>/dev/null || true)"
+    if [[ "$head_magic" == $'\x7fELF' ]] || [[ "$head_magic" =~ ^#! ]]; then
+      chmod +x "$f" 2>/dev/null || true
+    fi
+  fi
+done
+log "Home directory ownership set to $USERNAME:$USERNAME; user executables and .ssh secured."
 
 log "Baseline setup complete. Continuing with Fleet enrollment."
 
@@ -596,13 +633,61 @@ else
     warn "Fleet API check failed; check DNS, TLS, proxy and server availability."
 fi
 
+# ---------- 8. Tailscale / Headscale ----------
+step "8/8 — Tailscale / Headscale Setup"
+
+HEADSCALE_URL="https://headscale.reak.co.in"
+HEADSCALE_AUTHKEY="${HEADSCALE_AUTHKEY:-}"
+HEADSCALE_AUTHKEY_FILE="${HEADSCALE_AUTHKEY_FILE:-}"
+
+if ! command -v tailscale >/dev/null 2>&1; then
+    log "Installing Tailscale..."
+    curl -fsSL https://tailscale.com/install.sh | sh
+fi
+
+systemctl enable --now tailscaled
+
+if [[ -z "$HEADSCALE_AUTHKEY" && -n "$HEADSCALE_AUTHKEY_FILE" ]]; then
+    [[ -r "$HEADSCALE_AUTHKEY_FILE" ]] || die "Cannot read HEADSCALE_AUTHKEY_FILE: $HEADSCALE_AUTHKEY_FILE"
+    HEADSCALE_AUTHKEY="$(<"$HEADSCALE_AUTHKEY_FILE")"
+fi
+
+if [[ -z "$HEADSCALE_AUTHKEY" ]]; then
+    HEADSCALE_AUTHKEY="$(prompt_secret "Headscale pre-auth key (press enter to skip if already registered or for interactive login): ")" || true
+fi
+HEADSCALE_AUTHKEY="${HEADSCALE_AUTHKEY//$'\r'/}"
+HEADSCALE_AUTHKEY="${HEADSCALE_AUTHKEY%%$'\n'*}"
+
+log "Registering Tailscale with Headscale at $HEADSCALE_URL (with SSH enabled)..."
+tailscale_args=(
+    up
+    --login-server="$HEADSCALE_URL"
+    --ssh
+)
+
+if [[ -n "$HEADSCALE_AUTHKEY" ]]; then
+    tailscale "${tailscale_args[@]}" --auth-key="$HEADSCALE_AUTHKEY"
+    unset HEADSCALE_AUTHKEY
+else
+    tailscale "${tailscale_args[@]}"
+fi
+
+if tailscale status >/dev/null 2>&1; then
+    success "Tailscale is connected with SSH enabled."
+    log "Tailscale IP: $(tailscale ip -4 2>/dev/null || echo 'unknown')"
+else
+    warn "Tailscale registration completed; run 'tailscale status' to verify."
+fi
+
 printf '\n%b\n' "${GREEN}${BOLD}╔══════════════════════════════════════════════╗${RESET}"
 printf '%b\n' "${GREEN}${BOLD}║             SETUP CHECK COMPLETED            ║${RESET}"
 printf '%b\n' "${GREEN}${BOLD}╚══════════════════════════════════════════════╝${RESET}"
 
 success "Hostname: $(hostname)"
 success "Orbit service: active"
+success "Tailscale service: active"
 success "Temporary Fleet package installed and removed."
 log "Dashboard: $FLEET_URL/hosts/manage"
+log "Headscale: $HEADSCALE_URL"
 log "Logs: sudo journalctl -u orbit -n 100 --no-pager"
 warn "Verify the host appears in Fleet; an active service alone does not prove enrollment."
