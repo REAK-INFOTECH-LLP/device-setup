@@ -690,7 +690,10 @@ HEADSCALE_AUTHKEY="${HEADSCALE_AUTHKEY%%$'\n'*}"
 log "Registering Tailscale with Headscale at $HEADSCALE_URL (with SSH enabled)..."
 tailscale_args=(
     up
+    --reset
     --login-server="$HEADSCALE_URL"
+    --accept-routes
+    --accept-risk=lose-ssh
     --ssh
 )
 
