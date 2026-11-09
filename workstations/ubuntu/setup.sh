@@ -471,11 +471,12 @@ fleetctl --version
 success "Fleet CLI is ready."
 
 # ---------- 3. Existing agent ----------
-step "3/7 — Checking Existing Enrollment"
+step "3/7 — Checking Existing Enrollment & Host Identity"
 
 # "active" alone does not mean enrolled: a crash-looping orbit (e.g. 401
-# authentication failures) looks active between restarts. Detect that state
-# and force a clean re-enrollment instead of leaving it broken.
+# authentication failures) looks active between restarts. Also check if
+# Orbit is using the legacy hardware UUID/serial identifier (which causes
+# infinite overwrite ping-pong on cloned systems sharing identical serials).
 orbit_active=0
 if systemctl is-active --quiet orbit 2>/dev/null; then
   orbit_active=1
@@ -488,133 +489,148 @@ orbit_auth_failures="$(journalctl -u orbit --since '15 min ago' --no-pager 2>/de
 orbit_restarts="$(systemctl show orbit -p NRestarts --value 2>/dev/null || echo 0)"
 [[ "$orbit_restarts" =~ ^[0-9]+$ ]] || orbit_restarts=0
 
-if [[ "$orbit_active" -eq 1 && "$orbit_auth_failures" -eq 0 ]]; then
-    success "Orbit is already running; leaving it unchanged."
-    log "Status: systemctl status orbit --no-pager -l"
-    log "Logs: sudo journalctl -u orbit -n 100 --no-pager"
-    log "Dashboard: $FLEET_URL/hosts/manage"
-    exit 0
-fi
-
-if [[ "$orbit_auth_failures" -gt 0 || "$orbit_restarts" -ge 10 ]]; then
-    warn "Existing Fleet agent state looks broken (auth failures: $orbit_auth_failures, restarts: $orbit_restarts)."
+needs_enrollment=0
+if [[ "$orbit_installed" -eq 1 ]]; then
+  if ! grep -q '^ORBIT_HOST_IDENTIFIER=instance' /etc/default/orbit 2>/dev/null; then
+    warn "Orbit is currently using hardware UUID/serial identifier, causing enrollment collisions."
+    warn "Resetting Orbit state to configure a permanently unique instance identifier..."
+    systemctl stop orbit 2>/dev/null || true
+    systemctl reset-failed orbit 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y fleet-osquery 2>/dev/null || true
+    rm -rf /opt/orbit /var/lib/orbit
+    needs_enrollment=1
+  elif [[ "$orbit_auth_failures" -gt 0 || "$orbit_restarts" -ge 10 || "$orbit_active" -eq 0 ]]; then
+    warn "Existing Fleet agent state looks broken or inactive (auth failures: $orbit_auth_failures, restarts: $orbit_restarts)."
     warn "Removing it for a clean re-enrollment with the current secret."
     systemctl stop orbit 2>/dev/null || true
     systemctl reset-failed orbit 2>/dev/null || true
     DEBIAN_FRONTEND=noninteractive apt-get purge -y fleet-osquery 2>/dev/null || true
     rm -rf /opt/orbit /var/lib/orbit
-elif [[ "$orbit_installed" -eq 1 ]]; then
-    warn "fleet-osquery is installed, but Orbit is inactive."
-fi
-
-# ---------- 4. Temporary workspace ----------
-step "4/7 — Preparing Package Workspace"
-
-if [[ "$EUID" -eq 0 ]]; then
-    WORK_ROOT="$(mktemp -d /var/tmp/fleet-enrollment.XXXXXX)"
-    chown root:root "$WORK_ROOT"
+    needs_enrollment=1
+  else
+    success "Orbit is already running with an instance-unique host identifier."
+  fi
 else
-    install -d -m 700 "${XDG_CACHE_HOME:-$HOME/.cache}"
-    WORK_ROOT="$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/fleet-enrollment.XXXXXX")"
+  needs_enrollment=1
 fi
 
-[[ -d "$WORK_ROOT" && -w "$WORK_ROOT" ]] ||
-    die "Temporary workspace is not writable: $WORK_ROOT"
+if [[ "$needs_enrollment" -eq 1 ]]; then
+  # ---------- 4. Temporary workspace ----------
+  step "4/7 — Preparing Package Workspace"
 
-cleanup_fleet_workspace() {
-    [[ -n "${WORK_ROOT:-}" && -d "$WORK_ROOT" ]] && rm -rf -- "$WORK_ROOT"
-}
-trap cleanup_fleet_workspace EXIT
+  if [[ "$EUID" -eq 0 ]]; then
+      WORK_ROOT="$(mktemp -d /var/tmp/fleet-enrollment.XXXXXX)"
+      chown root:root "$WORK_ROOT"
+  else
+      install -d -m 700 "${XDG_CACHE_HOME:-$HOME/.cache}"
+      WORK_ROOT="$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/fleet-enrollment.XXXXXX")"
+  fi
 
-export TMPDIR="$WORK_ROOT"
-log "TMPDIR=$TMPDIR"
-success "Workspace is ready."
+  [[ -d "$WORK_ROOT" && -w "$WORK_ROOT" ]] ||
+      die "Temporary workspace is not writable: $WORK_ROOT"
 
-# ---------- 5. Enrollment secret ----------
-step "5/7 — Enrollment Secret"
+  cleanup_fleet_workspace() {
+      [[ -n "${WORK_ROOT:-}" && -d "$WORK_ROOT" ]] && rm -rf -- "$WORK_ROOT"
+  }
+  trap cleanup_fleet_workspace EXIT
 
-if [[ -z "$ENROLL_SECRET" && -n "$ENROLL_SECRET_FILE" ]]; then
-    [[ -r "$ENROLL_SECRET_FILE" ]] || die "Cannot read ENROLL_SECRET_FILE: $ENROLL_SECRET_FILE"
-    ENROLL_SECRET="$(<"$ENROLL_SECRET_FILE")"
-fi
-if [[ -z "$ENROLL_SECRET" ]]; then
-    ENROLL_SECRET="$(prompt_secret "Fleet enrollment secret: ")" || \
-        die "ENROLL_SECRET is required. Set ENROLL_SECRET or ENROLL_SECRET_FILE, or run from a terminal."
-fi
-ENROLL_SECRET="${ENROLL_SECRET//$'\r'/}"
-ENROLL_SECRET="${ENROLL_SECRET%%$'\n'*}"
-[[ -n "$ENROLL_SECRET" ]] || die "Enrollment secret cannot be empty."
+  export TMPDIR="$WORK_ROOT"
+  log "TMPDIR=$TMPDIR"
+  success "Workspace is ready."
 
-# ---------- 6. Generate package ----------
-step "6/7 — Generating Fleet Agent Package"
+  # ---------- 5. Enrollment secret ----------
+  step "5/7 — Enrollment Secret"
 
-cd "$WORK_ROOT"
-rm -f fleet-osquery_*.deb
+  if [[ -z "$ENROLL_SECRET" && -n "$ENROLL_SECRET_FILE" ]]; then
+      [[ -r "$ENROLL_SECRET_FILE" ]] || die "Cannot read ENROLL_SECRET_FILE: $ENROLL_SECRET_FILE"
+      ENROLL_SECRET="$(<"$ENROLL_SECRET_FILE")"
+  fi
+  if [[ -z "$ENROLL_SECRET" ]]; then
+      ENROLL_SECRET="$(prompt_secret "Fleet enrollment secret: ")" || \
+          die "ENROLL_SECRET is required. Set ENROLL_SECRET or ENROLL_SECRET_FILE, or run from a terminal."
+  fi
+  ENROLL_SECRET="${ENROLL_SECRET//$'\r'/}"
+  ENROLL_SECRET="${ENROLL_SECRET%%$'\n'*}"
+  [[ -n "$ENROLL_SECRET" ]] || die "Enrollment secret cannot be empty."
 
-log "Generating package for $FLEET_URL"
+  # ---------- 6. Generate package ----------
+  step "6/7 — Generating Fleet Agent Package"
 
-fleet_package_args=(
-    --type=deb
-    --fleet-desktop
-    --enable-scripts
-    --fleet-url="$FLEET_URL"
-    --enroll-secret="$ENROLL_SECRET"
-)
+  cd "$WORK_ROOT"
+  rm -f fleet-osquery_*.deb
 
-if ! (
-    # fleetctl creates its package directories expecting the default umask
-    # (0755 dirs). The workspace itself stays mode 0700, so run only the
-    # generator under umask 022 in a subshell; the outer umask 077 is kept.
-    umask 022
-    fleetctl package \
-        "${fleet_package_args[@]}"
-); then
-    unset ENROLL_SECRET
-    die "Package generation failed."
-fi
+  log "Generating package for $FLEET_URL with unique instance host identifier..."
 
-unset ENROLL_SECRET   # clear from environment as soon as possible
+  fleet_package_args=(
+      --type=deb
+      --fleet-desktop
+      --enable-scripts
+      --fleet-url="$FLEET_URL"
+      --enroll-secret="$ENROLL_SECRET"
+      --host-identifier=instance
+  )
 
-shopt -s nullglob
-fleet_debs=(fleet-osquery_*.deb)
-shopt -u nullglob
-if (( ${#fleet_debs[@]} != 1 )); then
-    die "Expected one generated fleet-osquery package, found ${#fleet_debs[@]}."
-fi
-PACKAGE_PATH="${fleet_debs[0]}"
-[[ -s "$PACKAGE_PATH" ]] || die "Generated package is empty."
+  if ! (
+      # fleetctl creates its package directories expecting the default umask
+      # (0755 dirs). The workspace itself stays mode 0700, so run only the
+      # generator under umask 022 in a subshell; the outer umask 077 is kept.
+      umask 022
+      fleetctl package \
+          "${fleet_package_args[@]}"
+  ); then
+      unset ENROLL_SECRET
+      die "Package generation failed."
+  fi
 
-PACKAGE_PATH="$WORK_ROOT/$PACKAGE_PATH"
-success "Package generated: $PACKAGE_PATH"
-log "Package size: $(du -h "$PACKAGE_PATH" | awk '{print $1}')"
+  unset ENROLL_SECRET   # clear from environment as soon as possible
 
-# ---------- 7. Install ----------
-step "7/7 — Installing Fleet Agent"
+  shopt -s nullglob
+  fleet_debs=(fleet-osquery_*.deb)
+  shopt -u nullglob
+  if (( ${#fleet_debs[@]} != 1 )); then
+      die "Expected one generated fleet-osquery package, found ${#fleet_debs[@]}."
+  fi
+  PACKAGE_PATH="${fleet_debs[0]}"
+  [[ -s "$PACKAGE_PATH" ]] || die "Generated package is empty."
 
-as_root apt-get install -y "$PACKAGE_PATH"
-success "Package installation completed."
-rm -f "$PACKAGE_PATH"
-log "Removed temporary package: $PACKAGE_PATH"
+  PACKAGE_PATH="$WORK_ROOT/$PACKAGE_PATH"
+  success "Package generated: $PACKAGE_PATH"
+  log "Package size: $(du -h "$PACKAGE_PATH" | awk '{print $1}')"
 
-# ---------- Start and verify ----------
-step "Starting and Verifying Agent"
+  # ---------- 7. Install ----------
+  step "7/7 — Installing Fleet Agent"
 
-as_root systemctl enable --now orbit
+  as_root apt-get install -y "$PACKAGE_PATH"
+  success "Package installation completed."
+  rm -f "$PACKAGE_PATH"
+  log "Removed temporary package: $PACKAGE_PATH"
 
-if systemctl is-active --quiet orbit; then
-    success "Orbit service is active."
-else
-    as_root journalctl -u orbit -n 60 --no-pager || true
-    die "Orbit failed to start."
-fi
+  # Configure environment file so Orbit always enforces instance identifier
+  install -d -m 755 /etc/default
+  cat > /etc/default/orbit <<EOF
+ORBIT_HOST_IDENTIFIER=instance
+EOF
 
-log "Waiting briefly to confirm the agent authenticates with Fleet..."
-sleep 25
-if journalctl -u orbit --since '2 min ago' --no-pager 2>/dev/null | grep -q '401 unauthenticated'; then
-    warn "Orbit reported '401 unauthenticated'; the host is NOT enrolled."
-    warn "Copy the exact enroll secret from Fleet (Hosts → Add hosts) and re-run with that ENROLL_SECRET."
-else
-    success "No authentication failures in recent Orbit logs."
+  # ---------- Start and verify ----------
+  step "Starting and Verifying Agent"
+
+  as_root systemctl enable --now orbit
+
+  if systemctl is-active --quiet orbit; then
+      success "Orbit service is active."
+  else
+      as_root journalctl -u orbit -n 60 --no-pager || true
+      die "Orbit failed to start."
+  fi
+
+  log "Waiting briefly to confirm the agent authenticates with Fleet..."
+  sleep 25
+  if journalctl -u orbit --since '2 min ago' --no-pager 2>/dev/null | grep -q '401 unauthenticated'; then
+      warn "Orbit reported '401 unauthenticated'; the host is NOT enrolled."
+      warn "Copy the exact enroll secret from Fleet (Hosts → Add hosts) and re-run with that ENROLL_SECRET."
+  else
+      success "No authentication failures in recent Orbit logs."
+  fi
 fi
 
 step "Connectivity Check"
