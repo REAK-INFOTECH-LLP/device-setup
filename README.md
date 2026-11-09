@@ -7,6 +7,7 @@ Setup and enrollment notes for REAK-managed devices.
 | Device class | Management system | Setup entry point |
 | --- | --- | --- |
 | Linux workstations | Fleet | [Ubuntu workstation setup](workstations/ubuntu/README.md) |
+| Windows workstations | Fleet | [Windows workstation setup](workstations/windows/README.md) |
 | Mobile devices | Miradore | [Mobile device setup](mobile/README.md) |
 
 Fleet and Miradore are separate management workflows. Headscale/Tailscale provides internal network access; SSH access is configured separately on workstations. Ubuntu Desktop Sharing and further Headscale/Tailscale automation are planned follow-up work.
@@ -14,6 +15,7 @@ Fleet and Miradore are separate management workflows. Headscale/Tailscale provid
 ## Repository layout
 
 - `workstations/ubuntu/` — Ubuntu workstation bootstrap and Fleet enrollment.
+- `workstations/windows/` — Windows workstation bootstrap and Fleet enrollment.
 - `mobile/` — Miradore enrollment notes.
 - `docs/` — shared operating notes and future enhancements.
 
